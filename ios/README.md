@@ -10,7 +10,7 @@ open Songitude/Songitude.xcodeproj
 ```
 
 1. Select the **Songitude** target → **Signing & Capabilities** → pick your Team.
-   (Bundle id `com.brianellissound.chromicduo.soundwalk` — change if that id is taken.)
+   (Bundle id `com.brianellissound.songitude` — change if that id is taken.)
 2. Build to a **real device**. GPS, background audio and the lock-screen require hardware; the
    Simulator can only fake a static location.
 3. Run.
