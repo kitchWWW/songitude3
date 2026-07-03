@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Songitude — Editor</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand">
+      <span class="dot"></span>
+      <span>Songitude<span class="sub"> · editor</span></span>
+    </div>
+
+    <div class="mode-switch" role="tablist" aria-label="Mode">
+      <button id="modeEdit"   class="active" role="tab">✎ Edit</button>
+      <button id="modeListen" role="tab">🎧 Listen</button>
+    </div>
+
+    <div class="io-buttons">
+      <span id="accountEmail" class="account-email" hidden></span>
+      <button id="importBtn">⇪ Import .zip</button>
+      <input id="importInput" type="file" accept=".zip" hidden />
+      <button id="exportBtn" class="primary">⇩ Export .zip</button>
+      <button id="publishBtn" class="publish" hidden>☁ Publish to app</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="mapPane">
+      <div id="editToolbar" class="toolbar">
+        <button id="toolPolygon">▰ Draw polygon</button>
+        <button id="toolCircle">◯ Draw circle</button>
+        <button id="toolSelect" class="active">➤ Select</button>
+        <span class="hint" id="toolHint">Select a tool to start drawing.</span>
+      </div>
+      <div id="listenToolbar" class="toolbar" hidden>
+        <span class="hint">Click the map to walk your virtual listener there.</span>
+        <div class="mode-switch" id="listenSpeed" role="tablist" aria-label="Move speed">
+          <button data-speed="walking" class="active">🚶 Walk</button>
+          <button data-speed="running">🏃 Run</button>
+          <button data-speed="teleport">⚡ Teleport</button>
+        </div>
+        <span class="listener-readout" id="listenerReadout">No listener placed</span>
+      </div>
+      <div id="map"></div>
+    </section>
+
+    <aside id="sidePane">
+      <div class="side-tabs">
+        <button id="tabBtnAreas" class="side-tab active">Sound areas <span id="shapeCount" class="count">0</span></button>
+        <button id="tabBtnDetails" class="side-tab">Details</button>
+      </div>
+
+      <div id="tabAreas" class="tab-panel">
+        <div id="selBar" hidden>
+          <span id="selCount"></span>
+          <button id="selDelete" class="danger">🗑 Delete</button>
+          <button id="selClear">Clear</button>
+        </div>
+        <div id="shapeList"></div>
+        <p id="emptyState" class="empty">
+          No sound areas yet.<br />Use <b>Draw polygon</b> or <b>Draw circle</b> on the map,
+          then drop an audio file onto a card.
+        </p>
+      </div>
+
+      <div id="tabDetails" class="tab-panel" hidden>
+        <div class="details-form">
+          <label class="field">
+            <span class="field-label">Title</span>
+            <input id="mapName" type="text" placeholder="Untitled sound walk" />
+          </label>
+          <label class="field">
+            <span class="field-label">Creator</span>
+            <input id="mapCreator" type="text" placeholder="Your name or ensemble" />
+          </label>
+          <label class="field">
+            <span class="field-label">About</span>
+            <textarea id="mapAbout" rows="6" maxlength="2000"
+              placeholder="Describe this sound walk (up to 2000 characters)."></textarea>
+            <span id="aboutCount" class="field-count">0 / 2000</span>
+          </label>
+          <div class="field">
+            <span class="field-label">Album art <span class="field-hint">— lock-screen artwork</span></span>
+            <label class="albumart-pick" title="Lock-screen artwork">
+              <img id="albumArtThumb" alt="" hidden />
+              <span id="albumArtLabel">＋ Choose image</span>
+              <input id="albumArtInput" type="file" accept="image/*" hidden />
+            </label>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <div id="toast" hidden></div>
+
+  <div id="publishModal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Publish to app</h2>
+        <button class="modal-x" id="pubClose" title="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-intro">Review the details below. Anything <b>missing is marked in red</b> —
+          fill it in on the <b>Details</b> tab before publishing.</p>
+        <div class="pub-summary">
+          <div class="pub-art">
+            <img id="pubArt" alt="" hidden />
+            <span id="pubArtEmpty" class="pub-art-empty">No art</span>
+          </div>
+          <dl class="pub-fields">
+            <div class="pub-row" data-field="title"><dt>Title</dt><dd id="pubTitle"></dd></div>
+            <div class="pub-row" data-field="creator"><dt>Creator</dt><dd id="pubCreator"></dd></div>
+            <div class="pub-row" data-field="about"><dt>About</dt><dd id="pubAbout"></dd></div>
+            <div class="pub-row" data-field="albumArt"><dt>Album art</dt><dd id="pubArtName"></dd></div>
+            <div class="pub-row" data-field="shapes"><dt>Sound areas</dt><dd id="pubShapes"></dd></div>
+            <div class="pub-row"><dt>Total size</dt><dd id="pubSize"></dd></div>
+          </dl>
+        </div>
+        <label class="pub-confirm">
+          <input type="checkbox" id="pubConfirm" />
+          <span>I confirm I have permission to upload all of these materials. Uploading work I
+            don't have the rights to may result in my account being banned.</span>
+        </label>
+        <div id="pubError" class="pub-error" hidden></div>
+      </div>
+      <div class="modal-foot">
+        <button id="pubCancel">Cancel</button>
+        <button id="pubGo" class="publish" disabled>☁ Publish</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="successModal" class="modal-overlay" hidden>
+    <div class="modal modal-sm">
+      <button class="modal-x" id="successClose" title="Close">✕</button>
+      <div class="success-icon">✓</div>
+      <h2 style="margin:0 0 6px">Published!</h2>
+      <p id="successMsg" class="success-msg"></p>
+      <canvas id="successQr" width="180" height="180" class="success-qr"></canvas>
+      <p class="success-qrcap">Scan with an iPhone that has the Songitude app to open this walk.</p>
+      <a id="successLink" class="success-link" target="_blank" rel="noopener"></a>
+      <button id="successOk" class="primary" style="margin-top:16px">Done</button>
+    </div>
+  </div>
+
+  <div id="loginGate" hidden>
+    <div class="login-card">
+      <div class="login-dot"></div>
+      <h2>Sign in to Songitude</h2>
+      <p>Composing and publishing sound walks requires an approved Google account.</p>
+      <div id="gbtn"></div>
+      <div id="gateError" class="gate-error" hidden></div>
+    </div>
+  </div>
+
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"
+          integrity="sha512-XMVd28F1oH/O71fzwBnV7HucLxVwtxf26XV8P4wPk26EDxuGZ91N8bsOttmnomcCD3CS5ZMRL50H0GgOHvegtg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="editor.js"></script>
+</body>
+</html>

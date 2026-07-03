@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Songitude — location-based sound walks</title>
+  <meta name="description" content="Songitude turns a map into music. Compose audio that changes with where you stand, then publish immersive sound walks to the iOS app." />
+  <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+  <link rel="apple-touch-icon" href="/icon.svg" />
+  <style>
+    :root{
+      --bg:#ffffff; --ink:#141a24; --muted:#5b6675; --line:#e6e9f1; --soft:#f5f7fb;
+      --accent:#2f6bff; --accent2:#7c5cff;
+    }
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{margin:0;background:var(--bg);color:var(--ink);
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+      line-height:1.6;-webkit-font-smoothing:antialiased}
+    a{color:var(--accent);text-decoration:none}
+    .wrap{max-width:1040px;margin:0 auto;padding:0 24px}
+    .dot{display:inline-block;width:22px;height:22px;border-radius:50%;vertical-align:-4px;
+      background:conic-gradient(from 0deg,#ff5b6e,#ffa94d,#35c98b,#5b8cff,#7c5cff,#ff5b6e)}
+
+    header{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.85);
+      backdrop-filter:saturate(180%) blur(10px);border-bottom:1px solid var(--line)}
+    nav{display:flex;align-items:center;gap:18px;height:64px}
+    .brand{font-weight:750;font-size:19px;letter-spacing:.2px;display:flex;align-items:center;gap:9px}
+    nav .spacer{flex:1}
+    nav a.navlink{color:var(--muted);font-weight:550;font-size:15px}
+    nav a.navlink:hover{color:var(--ink)}
+    .btn{display:inline-flex;align-items:center;gap:8px;border-radius:12px;padding:11px 18px;
+      font-weight:650;font-size:15px;border:1px solid transparent;cursor:pointer;transition:.15s}
+    .btn-primary{background:var(--accent);color:#fff}
+    .btn-primary:hover{background:#2a60e6;transform:translateY(-1px)}
+    .btn-ghost{background:#fff;color:var(--ink);border-color:var(--line)}
+    .btn-ghost:hover{border-color:#c4ccdd}
+
+    .hero{padding:84px 0 64px;background:
+      radial-gradient(1100px 480px at 78% -8%,rgba(124,92,255,.14),transparent 60%),
+      radial-gradient(900px 460px at 8% 4%,rgba(47,107,255,.12),transparent 55%)}
+    .hero h1{font-size:clamp(38px,6vw,66px);line-height:1.03;margin:0 0 18px;letter-spacing:-1.2px;font-weight:800}
+    .hero .lede{font-size:clamp(18px,2.4vw,22px);color:var(--muted);max-width:620px;margin:0 0 30px}
+    .hero .cta{display:flex;gap:14px;flex-wrap:wrap}
+    .pill{display:inline-block;font-size:13px;font-weight:650;color:var(--accent2);
+      background:rgba(124,92,255,.10);border-radius:999px;padding:5px 13px;margin-bottom:22px}
+
+    section{padding:64px 0;border-top:1px solid var(--line)}
+    h2{font-size:clamp(26px,3.4vw,36px);letter-spacing:-.5px;margin:0 0 12px;font-weight:780}
+    .sub{color:var(--muted);max-width:640px;margin:0 0 36px;font-size:17px}
+
+    .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+    .card{background:var(--soft);border:1px solid var(--line);border-radius:18px;padding:24px}
+    .card .n{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-weight:750;
+      color:#fff;background:linear-gradient(135deg,var(--accent),var(--accent2));margin-bottom:14px}
+    .card h3{margin:0 0 6px;font-size:19px}
+    .card p{margin:0;color:var(--muted);font-size:15px}
+
+    .split{display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center}
+    .kv{list-style:none;padding:0;margin:18px 0 0}
+    .kv li{display:flex;gap:12px;margin:12px 0;color:var(--muted)}
+    .kv b{color:var(--ink);font-weight:650}
+    .chk{color:var(--accent);font-weight:800}
+
+    .credits{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+    .credit{background:var(--soft);border:1px solid var(--line);border-radius:18px;padding:22px}
+    .credit .role{color:var(--muted);font-size:14px}
+    .credit .name{font-size:20px;font-weight:750;margin:2px 0 8px}
+
+    footer{border-top:1px solid var(--line);padding:34px 0;color:var(--muted);font-size:14px}
+    footer .row{display:flex;gap:16px;flex-wrap:wrap;align-items:center}
+    footer .spacer{flex:1}
+
+    @media(max-width:760px){
+      .steps{grid-template-columns:1fr}
+      .split,.credits{grid-template-columns:1fr}
+      nav a.navlink{display:none}
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <nav>
+        <span class="brand"><span class="dot"></span> Songitude</span>
+        <span class="spacer"></span>
+        <a class="navlink" href="#how">How it works</a>
+        <a class="navlink" href="#compose">For composers</a>
+        <a class="navlink" href="#app">The app</a>
+        <a class="btn btn-primary" href="/editor/index.html">Open the editor →</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="hero">
+    <div class="wrap">
+      <span class="pill">Location-based audio, composed on a map</span>
+      <h1>Turn a map<br/>into music.</h1>
+      <p class="lede">Songitude plays different sounds depending on where you're standing. Draw
+        regions on a map, drop in audio, choose how each one behaves — then publish an immersive
+        sound walk that people explore on foot with their phone.</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="/editor/index.html">Open the editor →</a>
+        <a class="btn btn-ghost" href="#app">Get the iOS app</a>
+      </div>
+    </div>
+  </div>
+
+  <section id="how">
+    <div class="wrap">
+      <h2>How it works</h2>
+      <p class="sub">A composer builds the walk in the browser; a listener experiences it on foot.
+        No coding required.</p>
+      <div class="steps">
+        <div class="card">
+          <div class="n">1</div>
+          <h3>Draw on a map</h3>
+          <p>Sketch circles and polygons over any location using the Leaflet-based editor —
+            each shape is a zone of sound.</p>
+        </div>
+        <div class="card">
+          <div class="n">2</div>
+          <h3>Assign sound & behavior</h3>
+          <p>Drop an audio file on each zone and pick how it plays: looping, one-shot, dialogue,
+            or sample-locked synced loops. Fade toward a center, layer freely.</p>
+        </div>
+        <div class="card">
+          <div class="n">3</div>
+          <h3>Publish to the app</h3>
+          <p>Preview with a virtual listener, then publish. Your walk appears in the Songitude
+            iOS app for anyone to walk and hear.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="compose">
+    <div class="wrap split">
+      <div>
+        <h2>For composers</h2>
+        <p class="sub">The editor is a full authoring tool that runs entirely in your browser.
+          Sign in with Google to create and publish walks.</p>
+        <ul class="kv">
+          <li><span class="chk">✓</span> <span><b>Map-native composition.</b> Place sound exactly where it should be heard.</span></li>
+          <li><span class="chk">✓</span> <span><b>Rich playback modes.</b> Loops, one-shots, ducking dialogue, and synced loops that stay rhythmically locked.</span></li>
+          <li><span class="chk">✓</span> <span><b>Listen mode.</b> Walk a virtual listener around and hear exactly what your audience will.</span></li>
+          <li><span class="chk">✓</span> <span><b>Portable bundles.</b> Everything exports as a single zip you can re-import, back up, or publish.</span></li>
+        </ul>
+        <p style="margin-top:26px"><a class="btn btn-primary" href="/editor/index.html">Open the editor →</a></p>
+      </div>
+      <div class="card" style="padding:28px">
+        <h3 style="margin-top:0">Invite-only for now</h3>
+        <p style="color:var(--muted)">To keep the app's catalog high-quality, the editor is
+          currently limited to approved Google accounts. Email
+          <a href="mailto:brian.e2014@gmail.com">brian.e2014@gmail.com</a> to request access.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="app">
+    <div class="wrap split">
+      <div class="card" style="padding:28px">
+        <h3 style="margin-top:0">Listen on iOS</h3>
+        <p style="color:var(--muted)">Open a walk, press play, and put your phone in your pocket.
+          The audio follows you as you move — and keeps playing in the background while your screen
+          is locked. A web player is coming soon.</p>
+        <p style="margin-bottom:0"><a href="/listen/index.html">Web player (preview) →</a></p>
+      </div>
+      <div>
+        <h2>The listening experience</h2>
+        <p class="sub">Built as a native app so the sound can keep rendering in the background —
+          something a web page can't do.</p>
+        <ul class="kv">
+          <li><span class="chk">✓</span> <span><b>Background audio.</b> Lock your phone, keep walking, keep listening.</span></li>
+          <li><span class="chk">✓</span> <span><b>Smart streaming.</b> Only the audio near you is loaded, so large walks stay light.</span></li>
+          <li><span class="chk">✓</span> <span><b>No account needed.</b> Browsing and listening are open to everyone.</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Credits</h2>
+      <p class="sub">Songitude is a collaboration between a creative technologist and a composer duo.</p>
+      <div class="credits">
+        <div class="credit">
+          <div class="role">Creative Coder</div>
+          <div class="name">Brian Ellis</div>
+          <a href="http://brianellissound.com">brianellissound.com</a>
+        </div>
+        <div class="credit">
+          <div class="role">Composer &amp; Creative Director</div>
+          <div class="name">Chromic Duo</div>
+          <div style="color:var(--muted);font-size:14px;margin-bottom:6px">Lucy Yao &amp; Dorothy Chan</div>
+          <a href="https://www.chromic.space">chromic.space</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap row">
+      <span class="brand" style="font-size:16px"><span class="dot" style="width:16px;height:16px"></span> Songitude</span>
+      <span class="spacer"></span>
+      <a href="/editor/index.html">Editor</a>
+      <a href="/listen/index.html">Web player</a>
+      <a href="http://brianellissound.com">Brian Ellis</a>
+      <a href="https://www.chromic.space">Chromic Duo</a>
+    </div>
+  </footer>
+</body>
+</html>

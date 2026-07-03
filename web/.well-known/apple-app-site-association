@@ -1,0 +1,11 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "6VXP2ZNFJU.com.brianellissound.chromicduo.soundwalk",
+        "paths": [ "/w.html", "/w/*" ]
+      }
+    ]
+  }
+}

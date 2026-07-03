@@ -1,0 +1,17 @@
+# macOS
+.DS_Store
+
+# Node (Lambda deps are restored with `npm install`)
+**/node_modules/
+
+# Xcode
+**/DerivedData/
+**/build/
+**/xcuserdata/
+*.xcuserstate
+
+# Large sample bundle — exceeds GitHub's 100 MB file limit; regenerate or re-add locally.
+ios/Songitude/Experiences/magic_square.zip
+
+# Scratch
+*.log

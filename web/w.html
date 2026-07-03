@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Songitude — open a sound walk</title>
+  <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+  <style>
+    :root{--ink:#141a24;--muted:#5b6675;--accent:#2f6bff;--line:#e6e9f1;--soft:#f5f7fb}
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;display:grid;place-items:center;background:#fff;color:var(--ink);
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+      background-image:radial-gradient(900px 460px at 80% -10%,rgba(124,92,255,.12),transparent 60%),
+        radial-gradient(760px 420px at 5% 2%,rgba(47,107,255,.10),transparent 55%)}
+    .box{max-width:520px;width:92%;text-align:center;padding:36px 26px}
+    .dot{width:48px;height:48px;border-radius:50%;margin:0 auto 18px;
+      background:conic-gradient(from 0deg,#ff5b6e,#ffa94d,#35c98b,#5b8cff,#7c5cff,#ff5b6e)}
+    h1{font-size:26px;margin:0 0 6px;letter-spacing:-.4px}
+    .creator{color:var(--muted);margin:0 0 16px}
+    .about{color:var(--muted);font-size:15px;line-height:1.6;margin:0 auto 22px;max-width:440px}
+    .btn{display:inline-block;border-radius:12px;padding:12px 20px;font-weight:650;
+      background:var(--accent);color:#fff;text-decoration:none}
+    .btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line);margin-left:8px}
+    .note{margin-top:22px;font-size:13px;color:var(--muted)}
+    .card{background:var(--soft);border:1px solid var(--line);border-radius:16px;padding:26px}
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div class="dot"></div>
+    <div class="card">
+      <h1 id="title">Open in the Songitude app</h1>
+      <p class="creator" id="creator"></p>
+      <p class="about" id="about">This link opens a Songitude sound walk. Install the Songitude
+        app on your iPhone, then scan or tap again to load it automatically.</p>
+      <a class="btn" href="/">About Songitude</a>
+      <a class="btn ghost" href="/editor/index.html">Open the editor</a>
+    </div>
+    <p class="note">If you have the app installed, this should have opened automatically.</p>
+  </div>
+
+  <script>
+    // Look up the walk in the public manifest and show its details as a nice fallback.
+    (async () => {
+      const id = new URLSearchParams(location.search).get("walk");
+      if (!id) return;
+      try {
+        const r = await fetch("https://songitude-walks.s3.amazonaws.com/walks/manifest.json", { cache: "no-store" });
+        const m = await r.json();
+        const w = (m.walks || []).find((x) => x.id === id);
+        if (!w) return;
+        document.getElementById("title").textContent = w.name || "Sound walk";
+        if (w.creator) document.getElementById("creator").textContent = "by " + w.creator;
+        if (w.about) document.getElementById("about").textContent = w.about;
+        document.title = "Songitude — " + (w.name || "sound walk");
+      } catch (_) { /* keep the default copy */ }
+    })();
+  </script>
+</body>
+</html>
