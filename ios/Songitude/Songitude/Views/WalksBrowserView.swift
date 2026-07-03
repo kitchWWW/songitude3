@@ -21,7 +21,16 @@ struct WalksBrowserView: View {
                         Text("No published walks yet. Publish one from the editor at songitude.com.")
                             .font(.footnote).foregroundStyle(.secondary)
                     } else {
-                        ForEach(app.catalog.walks) { walk in remoteRow(walk) }
+                        ForEach(app.catalog.walks) { walk in
+                            remoteRow(walk)
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    if WalkDownloader.isDownloaded(walk.id) && app.downloadingWalkId != walk.id {
+                                        Button(role: .destructive) { app.deleteDownloaded(walk.id) } label: {
+                                            Label("Remove download", systemImage: "trash")
+                                        }
+                                    }
+                                }
+                        }
                     }
                 } header: { Text("Published walks") } footer: {
                     if let e = app.catalogError { Text(e).foregroundStyle(.red) }
@@ -68,7 +77,8 @@ struct WalksBrowserView: View {
                     HStack(spacing: 10) {
                         if let d = distanceText(walk) { Label(d, systemImage: "location.fill") }
                         if let s = walk.sizeBytes { Text(sizeText(s)) }
-                        if cached { Text("Downloaded").foregroundStyle(.green) }
+                        if downloading { Text("Downloading…").foregroundStyle(.orange) }
+                        else if cached { Text("Downloaded").foregroundStyle(.green) }
                     }.font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer()

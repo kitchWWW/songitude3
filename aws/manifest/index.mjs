@@ -84,7 +84,10 @@ export const handler = async (event) => {
   for (const rec of event?.Records || []) {
     const key = decodeURIComponent((rec.s3?.object?.key || "").replace(/\+/g, " "));
     const m = key.match(/^walks\/([^/]+)\/bundle\.zip$/);
-    if (m) { try { await unpack(m[1]); } catch (e) { console.error("unpack failed", m[1], e); } }
+    // Only unpack on upload; deletes (ObjectRemoved) just trigger a manifest rebuild.
+    if (m && (rec.eventName || "").startsWith("ObjectCreated")) {
+      try { await unpack(m[1]); } catch (e) { console.error("unpack failed", m[1], e); }
+    }
   }
   const n = await rebuildManifest();
   return { statusCode: 200, body: `manifest: ${n} walks` };

@@ -94,6 +94,12 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Delete a downloaded walk's local files (server copy untouched; re-download to listen again).
+    func deleteDownloaded(_ id: String) {
+        WalkDownloader.deleteCache(id)
+        objectWillChange.send()
+    }
+
     // MARK: - Deep link (open a specific walk as the default)
 
     func handleDeepLink(_ url: URL) {

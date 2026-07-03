@@ -78,9 +78,6 @@ struct SettingsView: View {
         Section("Credits") {
             creditRow(name: "Brian Ellis", role: "Creative Coder",
                       url: "http://brianellissound.com")
-            creditRow(name: "Chromic Duo", role: "Composer & Creative Director",
-                      subtitle: "Lucy Yao & Dorothy Chan",
-                      url: "https://www.chromic.space")
         }
     }
 

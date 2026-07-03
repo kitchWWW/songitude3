@@ -2,38 +2,116 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Songitude — web player (coming soon)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Songitude — web player</title>
   <link rel="icon" type="image/svg+xml" href="/icon.svg" />
   <link rel="apple-touch-icon" href="/icon.svg" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
   <style>
-    :root{--ink:#141a24;--muted:#5b6675;--accent:#2f6bff;--line:#e6e9f1}
+    :root{--ink:#141a24;--muted:#5b6675;--line:#e6e9f1;--accent:#2f6bff;--accent2:#7c5cff;--soft:#f5f7fb;--ok:#159a5b;--danger:#e5484d}
     *{box-sizing:border-box}
-    body{margin:0;min-height:100vh;display:grid;place-items:center;background:#fff;color:var(--ink);
-      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-      background-image:radial-gradient(900px 460px at 80% -10%,rgba(124,92,255,.12),transparent 60%),
-        radial-gradient(760px 420px at 5% 2%,rgba(47,107,255,.10),transparent 55%)}
-    .box{max-width:560px;text-align:center;padding:40px 28px}
-    .dot{width:56px;height:56px;border-radius:50%;margin:0 auto 22px;
+    html,body{height:100%;margin:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);overflow:hidden}
+    button{font:inherit;cursor:pointer;border:none}
+    [hidden]{display:none !important}
+    .dot{display:inline-block;width:16px;height:16px;border-radius:50%;vertical-align:-3px;
       background:conic-gradient(from 0deg,#ff5b6e,#ffa94d,#35c98b,#5b8cff,#7c5cff,#ff5b6e)}
-    h1{font-size:34px;letter-spacing:-.6px;margin:0 0 10px}
-    p{color:var(--muted);font-size:18px;line-height:1.6;margin:0 0 26px}
-    .btn{display:inline-block;border-radius:12px;padding:11px 18px;font-weight:650;
-      background:var(--accent);color:#fff;text-decoration:none}
+
+    #map{position:absolute;inset:0;background:#dfe6ef}
+    .leaflet-container{background:#dfe6ef}
+    .user-marker{width:18px;height:18px;border-radius:50%;background:var(--accent);border:3px solid #fff;box-shadow:0 0 0 4px rgba(47,107,255,.30)}
+
+    header{position:absolute;top:0;left:0;right:0;z-index:500;display:flex;align-items:center;gap:10px;
+      padding:calc(env(safe-area-inset-top) + 10px) 14px 10px;pointer-events:none}
+    header .pill{pointer-events:auto;background:rgba(255,255,255,.86);backdrop-filter:blur(8px);
+      border:1px solid var(--line);border-radius:999px;padding:8px 14px;font-weight:650;display:flex;align-items:center;gap:8px;box-shadow:0 2px 10px rgba(20,30,55,.08)}
+    header .title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;justify-content:center}
+    header .icon{width:42px;height:42px;justify-content:center;padding:0}
+
+    #controls{position:absolute;left:0;right:0;bottom:0;z-index:500;display:flex;flex-direction:column;align-items:center;gap:8px;
+      padding:14px 14px calc(env(safe-area-inset-bottom) + 18px);pointer-events:none}
+    #status{pointer-events:auto;background:rgba(255,255,255,.86);backdrop-filter:blur(8px);border:1px solid var(--line);
+      border-radius:12px;padding:8px 14px;font-size:13px;color:var(--muted);text-align:center;max-width:92vw}
+    #playBtn{pointer-events:auto;width:80px;height:80px;border-radius:50%;color:#fff;font-size:32px;
+      background:var(--accent);box-shadow:0 8px 24px rgba(47,107,255,.4);display:grid;place-items:center}
+    #playBtn.playing{background:var(--danger);box-shadow:0 8px 24px rgba(229,72,77,.4)}
+    #playBtn:disabled{opacity:.5}
+
+    .overlay{position:absolute;inset:0;z-index:1000;background:rgba(20,30,55,.5);backdrop-filter:blur(4px);display:grid;place-items:center;padding:18px}
+    .sheet{background:#fff;border:1px solid var(--line);border-radius:18px;width:min(460px,94vw);max-height:88vh;overflow:auto;box-shadow:0 20px 60px rgba(20,30,55,.3)}
+    .sheet-head{display:flex;align-items:center;padding:16px 18px;border-bottom:1px solid var(--line)}
+    .sheet-head h2{margin:0;font-size:18px;flex:1}
+    .sheet-head button{background:transparent;color:var(--muted);font-size:16px;padding:4px 8px;border-radius:8px}
+    .sheet-body{padding:16px 18px}
+
+    .welcome{text-align:center;padding:26px 24px}
+    .welcome .bigdot{width:60px;height:60px;border-radius:50%;margin:0 auto 16px;background:conic-gradient(from 0deg,#ff5b6e,#ffa94d,#35c98b,#5b8cff,#7c5cff,#ff5b6e)}
+    .welcome h1{font-size:26px;margin:0 0 8px;letter-spacing:-.4px}
+    .welcome p{color:var(--muted);line-height:1.6;margin:0 0 14px}
+    .btn{display:inline-block;border-radius:12px;padding:12px 20px;font-weight:650;background:var(--accent);color:#fff;text-decoration:none}
     .btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line);margin-left:8px}
-    .note{margin-top:26px;font-size:14px;color:var(--muted)}
+    .note{background:#fff7e6;border:1px solid #ffe1a6;color:#7a5b12;border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.5;margin:14px 0;text-align:left}
+
+    .walk-row{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--line);border-radius:12px;margin-bottom:10px;cursor:pointer;background:#fff;width:100%;text-align:left}
+    .walk-row:hover{border-color:var(--accent)}
+    .walk-row .info{flex:1;min-width:0}
+    .walk-row .info h4{margin:0 0 2px;font-size:15px}
+    .walk-row .info .meta{font-size:12px;color:var(--muted)}
+    .walk-row .go{color:var(--accent);font-size:20px}
+    .empty{color:var(--muted);text-align:center;padding:22px}
+
+    #toast{position:absolute;bottom:120px;left:50%;transform:translateX(-50%);z-index:1200;background:#fff;border:1px solid var(--line);
+      border-radius:10px;padding:10px 16px;box-shadow:0 8px 30px rgba(20,30,55,.2);max-width:88vw;font-size:14px}
+    #toast.err{border-color:var(--danger)}
   </style>
 </head>
 <body>
-  <div class="box">
-    <div class="dot"></div>
-    <h1>Web player — coming soon</h1>
-    <p>A browser-based way to preview sound walks is on the way. Because a web page can't render
-      audio in the background, the full experience lives in the iOS app — but you'll soon be able
-      to sample walks right here.</p>
-    <a class="btn" href="/">← Back to Songitude</a>
-    <a class="btn ghost" href="/editor/index.html">Open the editor</a>
-    <div class="note">Want to compose? The editor is ready today.</div>
+  <div id="map"></div>
+
+  <header>
+    <a class="pill icon" href="/" title="Songitude home"><span class="dot"></span></a>
+    <button class="pill title" id="titleBtn">Choose a walk ▾</button>
+    <button class="pill icon" id="browseBtn" title="Browse walks">🗂</button>
+  </header>
+
+  <div id="controls">
+    <div id="status" hidden></div>
+    <button id="playBtn" disabled aria-label="Play">▶</button>
   </div>
+
+  <div id="toast" hidden></div>
+
+  <div id="welcomeOverlay" class="overlay">
+    <div class="sheet">
+      <div class="welcome">
+        <div class="bigdot"></div>
+        <h1>Songitude web player</h1>
+        <p>Put on headphones, pick a walk, and move around — the sound changes with where you stand.</p>
+        <div class="note">
+          <b>Heads up:</b> this web page can't run in the background. <b>Keep this page open</b> and your
+          screen on while you listen. For a true pocket-and-walk experience, use the iOS app.
+        </div>
+        <div>
+          <button class="btn" id="welcomeBrowse">Browse walks</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="pickerOverlay" class="overlay" hidden>
+    <div class="sheet">
+      <div class="sheet-head">
+        <h2>Sound walks</h2>
+        <button id="pickerRefresh" title="Reload">⟳</button>
+        <button id="pickerClose" title="Close">✕</button>
+      </div>
+      <div class="sheet-body"><div id="walksList"></div></div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="player.js"></script>
 </body>
 </html>

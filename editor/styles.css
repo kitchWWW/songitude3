@@ -95,8 +95,18 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accen
 .albumart-pick:hover { border-color: var(--accent); color: var(--text); }
 #albumArtThumb { width: 34px; height: 34px; border-radius: 6px; object-fit: cover; }
 .io-buttons { display: flex; gap: 8px; margin-left: auto; align-items: center; }
-/* Fixed width so the live "Exporting NN%" label doesn't resize the button (and jostle the bar). */
-#exportBtn { min-width: 150px; text-align: center; }
+/* Toolbar dropdown menu */
+.menu-wrap { position: relative; }
+#menuBtn { min-width: 140px; text-align: center; }   /* fixed so "Exporting NN%" doesn't resize it */
+.menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 600; min-width: 200px;
+  background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 6px;
+  display: flex; flex-direction: column; box-shadow: 0 8px 30px rgba(20, 30, 55, .18);
+}
+.menu button { text-align: left; border: none; background: transparent; border-radius: 8px; padding: 9px 12px; font-size: 14px; color: var(--text); }
+.menu button:hover { background: var(--panel-2); }
+.menu .menu-publish { color: var(--accent-2); font-weight: 650; }
+.speed-select { font-size: 13px; }
 
 /* ---------- Main split ---------- */
 main { flex: 1; display: flex; min-height: 0; }
@@ -266,9 +276,20 @@ button.publish:hover { background: #5c3fe0; }
 .success-icon { width: 56px; height: 56px; border-radius: 50%; margin: 0 auto 14px; display: grid;
   place-items: center; color: #fff; font-size: 28px; background: var(--ok); }
 .success-msg { color: var(--muted); margin: 0 0 16px; }
-.success-qr { border: 1px solid var(--line); border-radius: 10px; padding: 6px; background: #fff; }
+.modal-sm .modal-x { position: absolute; top: 12px; left: 12px; }
+.success-qr { width: 200px; height: 200px; border: 1px solid var(--line); border-radius: 10px; padding: 6px; background: #fff; }
 .success-qrcap { font-size: 12px; color: var(--muted); margin: 10px 0 6px; }
 .success-link { font-size: 12px; word-break: break-all; }
+
+/* My-walks list */
+.walks-list { display: flex; flex-direction: column; gap: 10px; }
+.walks-empty { color: var(--muted); text-align: center; padding: 26px; }
+.walk-item { display: flex; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+.walk-item .info { flex: 1; min-width: 0; }
+.walk-item .info h4 { margin: 0 0 2px; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.walk-item .info .meta { font-size: 12px; color: var(--muted); }
+.walk-item .actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.walk-item .actions button { font-size: 12px; padding: 5px 9px; }
 
 /* ---------- Toast ---------- */
 #toast {

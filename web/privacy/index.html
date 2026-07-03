@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Songitude — Privacy Policy</title>
+  <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+  <style>
+    :root{--ink:#1b2330;--muted:#5b6675;--line:#e6e9f1;--accent:#2f6bff}
+    *{box-sizing:border-box}
+    body{margin:0;background:#fff;color:var(--ink);line-height:1.65;
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+    .wrap{max-width:760px;margin:0 auto;padding:48px 22px 80px}
+    h1{font-size:32px;letter-spacing:-.5px;margin:0 0 6px}
+    .updated{color:var(--muted);font-size:14px;margin:0 0 28px}
+    h2{font-size:20px;margin:34px 0 8px}
+    p,li{color:#2b3442}
+    a{color:var(--accent)}
+    .callout{background:#eef4ff;border:1px solid #cfe0ff;border-radius:12px;padding:16px 18px;margin:18px 0}
+    .callout b{color:var(--ink)}
+    footer{margin-top:48px;color:var(--muted);font-size:14px;border-top:1px solid var(--line);padding-top:18px}
+    .home{color:var(--muted);text-decoration:none;font-size:14px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="home" href="/">← Songitude</a>
+    <h1>Privacy Policy</h1>
+    <p class="updated">Last updated: July 3, 2026</p>
+
+    <p>Songitude is a location-based audio experience: it plays different sounds depending on where
+      you are physically standing. This policy explains exactly what data is involved.</p>
+
+    <div class="callout">
+      <b>Your location, in plain terms:</b> we request access to your location <b>only</b> to deliver
+      the audio experience (playing the right sounds for where you're standing) and to sort the
+      "sound walks near you" list. Your location is used in real time on your device — we do
+      <b>not</b> collect it, transmit it to our servers, store it, log it, sell it, or share it.
+    </div>
+
+    <h2>Location data</h2>
+    <p>When you play a sound walk, the app (or web player) reads your device's location continuously
+      to decide which sounds you should hear. This processing happens <b>on your device</b>. The
+      "walks near you" ordering is computed on your device using your most recent location. At no
+      point is your location sent to Songitude's servers or any third party.</p>
+
+    <h2>What we do store</h2>
+    <p>The only personal data we store is for <b>creators who publish walks</b>:</p>
+    <ul>
+      <li><b>Google account email</b> — used solely to check that you're approved to publish, and
+        recorded as the owner of walks you publish so you can manage them.</li>
+      <li><b>Walk content you upload</b> — the audio, map shapes, title, creator name, and description
+        you choose to publish. These are made publicly available in the app's catalog by design.</li>
+    </ul>
+    <p>If you only <b>listen</b>, you don't sign in and we store nothing about you.</p>
+
+    <h2>No tracking or ads</h2>
+    <p>Songitude contains no advertising, no analytics/tracking SDKs, and no third-party trackers.</p>
+
+    <h2>Third-party services</h2>
+    <ul>
+      <li><b>Amazon Web Services (S3, Lambda)</b> — hosts published walks and runs a small serverless
+        function that verifies a creator's Google sign-in when publishing. It never receives your location.</li>
+      <li><b>Google Sign-In</b> — used only to authenticate approved creators. Governed by Google's
+        privacy policy.</li>
+      <li><b>Map tiles (OpenStreetMap / CARTO)</b> — used to draw the map. Standard tile requests do
+        not include your precise location.</li>
+    </ul>
+
+    <h2>Children</h2>
+    <p>Songitude is not directed to children under 13 and does not knowingly collect their data.</p>
+
+    <h2>Changes</h2>
+    <p>We may update this policy; material changes will be reflected here with a new date.</p>
+
+    <h2>Contact</h2>
+    <p>Questions? Email <a href="mailto:brian.e2014@gmail.com">brian.e2014@gmail.com</a>.</p>
+
+    <footer>Songitude · created by Brian Ellis</footer>
+  </div>
+</body>
+</html>

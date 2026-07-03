@@ -3,7 +3,7 @@
 // browser uploads the (possibly huge) bundle zip DIRECTLY to S3 — no file passes through Lambda.
 //
 // Env: WALKS_BUCKET, GOOGLE_CLIENT_ID, ALLOWED_EMAILS (comma-separated), ALLOW_ORIGIN
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "crypto";
 
@@ -53,31 +53,59 @@ export const handler = async (event) => {
     if (body.check === true) return resp(200, JSON.stringify({ authorized, email }));
     if (!authorized) return resp(403, "This Google account isn't approved yet. Email brian.e2014@gmail.com to request access.");
 
-    const name = String(body.name || "Untitled sound walk").slice(0, 120);
-    const creator = String(body.creator || "").slice(0, 120);
-    const about = String(body.about || "").slice(0, 2000);
-    const walkId = slug(name) + "-" + randomUUID().slice(0, 8);
+    // Manage an existing walk — owner only.
+    if (body.action === "delete" || body.action === "update") {
+      const walkId = String(body.walkId || "");
+      if (!/^[\w.-]+$/.test(walkId)) return resp(400, "bad walkId");
+      const owner = await ownerOf(walkId);
+      if (owner === null) return resp(404, "walk not found");
+      if (owner !== email) return resp(403, "this walk belongs to someone else");
+      if (body.action === "delete") { await deleteWalk(walkId); return resp(200, JSON.stringify({ deleted: walkId })); }
+      return resp(200, JSON.stringify(await writeMetaAndPresign(walkId, body, email)));  // update existing id
+    }
 
-    // Store lightweight metadata now (the manifest builder reads this — no need to unzip).
-    const meta = {
-      id: walkId, name, creator, about,
-      center: Array.isArray(body.center) ? body.center : null,
-      zoom: Number(body.zoom) || 16,
-      shapeCount: Number(body.shapeCount) || 0,
-      owner: email, updatedAt: new Date().toISOString(),
-    };
-    await s3.send(new PutObjectCommand({
-      Bucket: BUCKET, Key: `walks/${walkId}/meta.json`,
-      Body: JSON.stringify(meta), ContentType: "application/json",
-    }));
-
-    const uploadUrl = await getSignedUrl(s3, new PutObjectCommand({
-      Bucket: BUCKET, Key: `walks/${walkId}/bundle.zip`, ContentType: "application/zip",
-    }), { expiresIn: 3600 });
-
-    return resp(200, JSON.stringify({ uploadUrl, walkId }));
+    // New publish → fresh id.
+    const walkId = slug(String(body.name || "Untitled sound walk")) + "-" + randomUUID().slice(0, 8);
+    return resp(200, JSON.stringify(await writeMetaAndPresign(walkId, body, email)));
   } catch (e) {
     console.error(e);
     return resp(500, "error: " + (e?.message || String(e)));
   }
 };
+
+async function writeMetaAndPresign(walkId, body, email) {
+  const meta = {
+    id: walkId,
+    name: String(body.name || "Untitled sound walk").slice(0, 120),
+    creator: String(body.creator || "").slice(0, 120),
+    about: String(body.about || "").slice(0, 2000),
+    center: Array.isArray(body.center) ? body.center : null,
+    zoom: Number(body.zoom) || 16,
+    shapeCount: Number(body.shapeCount) || 0,
+    owner: email, updatedAt: new Date().toISOString(),
+  };
+  await s3.send(new PutObjectCommand({
+    Bucket: BUCKET, Key: `walks/${walkId}/meta.json`, Body: JSON.stringify(meta), ContentType: "application/json",
+  }));
+  const uploadUrl = await getSignedUrl(s3, new PutObjectCommand({
+    Bucket: BUCKET, Key: `walks/${walkId}/bundle.zip`, ContentType: "application/zip",
+  }), { expiresIn: 3600 });
+  return { uploadUrl, walkId };
+}
+
+async function ownerOf(walkId) {
+  try {
+    const g = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: `walks/${walkId}/meta.json` }));
+    return (JSON.parse(await g.Body.transformToString()).owner || "").toLowerCase();
+  } catch { return null; }
+}
+
+async function deleteWalk(id) {
+  let token;
+  do {
+    const r = await s3.send(new ListObjectsV2Command({ Bucket: BUCKET, Prefix: `walks/${id}/`, ContinuationToken: token }));
+    const objs = (r.Contents || []).map((o) => ({ Key: o.Key }));
+    if (objs.length) await s3.send(new DeleteObjectsCommand({ Bucket: BUCKET, Delete: { Objects: objs } }));
+    token = r.IsTruncated ? r.NextContinuationToken : undefined;
+  } while (token);
+}

@@ -13,6 +13,7 @@
     name: "",
     creator: "",
     about: "",
+    walkId: null,              // set if this document is a published walk the user owns (update vs new)
     center: [40.7128, -74.006],
     zoom: 15,
     shapes: [],                // see makeShape()
@@ -20,7 +21,8 @@
     albumArt: null,            // { name, blob, url } | null
     listenSpeed: "walking",    // "walking" | "running" | "teleport"
   };
-  const LISTEN_SPEED = { walking: 1.4, running: 3.5 };   // metres / second (avg walk / run)
+  // metres / second — walk, run, bike (~24 km/h), drive (~48 km/h). Teleport is instant.
+  const LISTEN_SPEED = { walking: 1.4, running: 3.5, biking: 6.7, driving: 13.4 };
 
   // Fixed color per shape type so the map reads consistently: circles red, polygons blue.
   // (Individual shapes can still be recolored via the swatch.)
@@ -952,7 +954,7 @@
   }
 
   async function exportZip() {
-    const btn = $("exportBtn");
+    const btn = $("menuBtn");
     if (btn.disabled) return;                       // guard against double-clicks
     const original = btn.innerHTML;
     const label = (pct) => { btn.innerHTML = `<span class="spinner"></span> Exporting ${pct}%`; };
@@ -989,7 +991,7 @@
 
       // wipe current state
       state.shapes.forEach((s) => { engine.stopShape(s); if (s.layer) map.removeLayer(s.layer); });
-      state.shapes = []; state.selectedIds.clear();
+      state.shapes = []; state.selectedIds.clear(); state.walkId = null;
       audioStore.forEach((r) => URL.revokeObjectURL(r.url));
       audioStore.clear(); decoded.clear();
       artStore.forEach((r) => URL.revokeObjectURL(r.url));
@@ -1173,14 +1175,11 @@
   // ================================================================ WIRING ===
   $("modeEdit").onclick = () => setMode("edit");
   $("modeListen").onclick = () => setMode("listen");
-  document.querySelectorAll("#listenSpeed button").forEach((b) => {
-    b.onclick = () => {
-      state.listenSpeed = b.dataset.speed;
-      document.querySelectorAll("#listenSpeed button").forEach((x) => x.classList.toggle("active", x === b));
-      if (state.listenSpeed === "teleport") stopMoving();
-      else if (listenerPos && listenerTarget && listenerPos !== listenerTarget) startMoving();
-    };
-  });
+  $("listenSpeed").onchange = (e) => {
+    state.listenSpeed = e.target.value;
+    if (state.listenSpeed === "teleport") stopMoving();
+    else if (listenerPos && listenerTarget && listenerPos !== listenerTarget) startMoving();
+  };
   $("toolSelect").onclick = () => setTool("select");
   $("toolPolygon").onclick = () => setTool("polygon");
   $("toolCircle").onclick = () => setTool("circle");
@@ -1214,8 +1213,14 @@
   $("albumArtInput").onchange = (e) => { if (e.target.files[0]) { setAlbumArt(e.target.files[0]); commit(); } };
   $("albumArtThumb").onclick = (e) => e.stopPropagation();
 
-  $("exportBtn").onclick = exportZip;
-  $("importBtn").onclick = () => $("importInput").click();
+  // toolbar dropdown menu (Import / Export / My walks / Publish)
+  const closeMenu = () => { $("menu").hidden = true; };
+  $("menuBtn").onclick = (e) => { e.stopPropagation(); if (!$("menuBtn").disabled) $("menu").hidden = !$("menu").hidden; };
+  document.addEventListener("click", (e) => { if (!e.target.closest(".menu-wrap")) closeMenu(); });
+  $("mImport").onclick = () => { closeMenu(); $("importInput").click(); };
+  $("mExport").onclick = () => { closeMenu(); exportZip(); };
+  $("mWalks").onclick = () => { closeMenu(); openWalksModal(); };
+  $("mPublish").onclick = () => { closeMenu(); openPublishModal(); };
   $("importInput").onchange = (e) => { if (e.target.files[0]) importZip(e.target.files[0]); e.target.value = ""; };
 
   // Warn before leaving/closing the tab if there are edits that haven't been exported.
@@ -1275,7 +1280,8 @@
     $("gateError").hidden = true;
     $("accountEmail").textContent = userEmail || "signed in";
     $("accountEmail").hidden = false;
-    $("publishBtn").hidden = !publishReady;
+    $("mPublish").hidden = !publishReady;
+    $("mWalks").hidden = !publishReady;
   }
 
   function rejectAccess() {
@@ -1311,7 +1317,10 @@
     if (!state.shapes.length) m.add("shapes");
     return m;
   }
-  function updatePubGo() { $("pubGo").disabled = !(publishMissing().size === 0 && $("pubConfirm").checked); }
+  function updatePubGo() {
+    const ok = publishMissing().size === 0 && $("pubConfirm").checked;
+    $("pubGo").disabled = !ok; $("pubUpdate").disabled = !ok;
+  }
   function closePublishModal() { $("publishModal").hidden = true; }
 
   function openPublishModal() {
@@ -1331,22 +1340,41 @@
     const missing = publishMissing();
     document.querySelectorAll("#publishModal .pub-row[data-field]").forEach((row) =>
       row.classList.toggle("missing", missing.has(row.dataset.field)));
+    // Update-vs-new: only when this document is an already-published walk the user owns.
+    const owned = !!state.walkId;
+    $("pubUpdate").hidden = !owned;
+    $("pubGo").textContent = owned ? "☁ Publish as new" : "☁ Publish";
     $("pubConfirm").checked = false;
     updatePubGo();
     $("publishModal").hidden = false;
   }
 
-  async function runPublish() {
-    const btn = $("pubGo"); if (btn.disabled) return;
+  // XHR PUT with byte-level upload progress (fetch can't report upload progress).
+  function putWithProgress(url, blob, contentType, onProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", url);
+      xhr.setRequestHeader("Content-Type", contentType);
+      xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+      xhr.onload = () => (xhr.status >= 200 && xhr.status < 300) ? resolve() : reject(new Error("upload failed (HTTP " + xhr.status + ")"));
+      xhr.onerror = () => reject(new Error("upload network error"));
+      xhr.send(blob);
+    });
+  }
+
+  async function runPublish(mode) {   // mode: "new" | "update"
+    const btn = mode === "update" ? $("pubUpdate") : $("pubGo");
+    if (btn.disabled) return;
     const orig = btn.innerHTML;
     const label = (t) => { btn.innerHTML = `<span class="spinner"></span> ${t}`; };
-    const busy = (b) => { btn.disabled = b; ["pubCancel", "pubClose", "pubConfirm"].forEach((id) => $(id).disabled = b); };
+    const busy = (b) => { ["pubCancel", "pubClose", "pubConfirm", "pubGo", "pubUpdate"].forEach((id) => $(id).disabled = b); };
     busy(true); $("pubError").hidden = true;
     try {
       label("Zipping… 0%");
       const { blob } = await buildBundleZip((p) => label(`Zipping… ${p}%`));
       const m = bundleMeta();
       const meta = { name: m.name, creator: m.creator, about: m.about, center: m.center, zoom: m.zoom, shapeCount: m.shapes.length };
+      if (mode === "update") { meta.action = "update"; meta.walkId = state.walkId; }
       label("Requesting…");
       const r = await fetch(CFG.publishApiUrl, {
         method: "POST",
@@ -1355,9 +1383,9 @@
       });
       if (!r.ok) throw new Error((await r.text().catch(() => "")) || ("HTTP " + r.status));
       const { uploadUrl, walkId } = await r.json();
-      label("Uploading…");
-      const up = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": "application/zip" }, body: blob });
-      if (!up.ok) throw new Error("upload failed (HTTP " + up.status + ")");
+      label("Uploading… 0%");
+      await putWithProgress(uploadUrl, blob, "application/zip", (f) => label(`Uploading… ${Math.round(f * 100)}%`));
+      state.walkId = walkId;   // this document is now an owned, published walk
       dirty = false;
       closePublishModal();
       showSuccess(m.name, walkId);
@@ -1370,21 +1398,100 @@
     }
   }
 
+  let lastQrDataUrl = null, lastQrName = "soundwalk";
   function showSuccess(name, walkId) {
     const url = "https://songitude.com/w.html?walk=" + encodeURIComponent(walkId);
     $("successMsg").innerHTML = `<b>${name}</b> is now available in the app.`;
     $("successLink").textContent = url; $("successLink").href = url;
-    try { if (window.QRCode) QRCode.toCanvas($("successQr"), url, { width: 180, margin: 1 }); } catch (_) {}
+    lastQrName = (name || "soundwalk").replace(/[^\w.-]+/g, "_");
+    lastQrDataUrl = null;
+    if (window.QRCode) {
+      QRCode.toDataURL(url, { width: 320, margin: 2 }, (err, dataUrl) => {
+        if (!err) { lastQrDataUrl = dataUrl; $("successQr").src = dataUrl; }
+      });
+    }
     $("successModal").hidden = false;
   }
+  function downloadQr() {
+    if (!lastQrDataUrl) { toast("QR not ready yet.", "err"); return; }
+    const a = document.createElement("a");
+    a.href = lastQrDataUrl; a.download = lastQrName + "_QR_code.png";
+    document.body.appendChild(a); a.click(); a.remove();
+  }
 
-  $("publishBtn").onclick = openPublishModal;
+  // ---- My walks: manage the signed-in user's published walks -----------
+  function openWalksModal() {
+    if (!idToken || !userEmail) { toast("Sign in with Google first.", "err"); return; }
+    $("walksModal").hidden = false;
+    renderWalksList("<p class='walks-empty'>Loading…</p>");
+    fetch("https://songitude-walks.s3.amazonaws.com/walks/manifest.json", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((m) => renderWalksList((m.walks || []).filter((w) => (w.owner || "").toLowerCase() === userEmail.toLowerCase())))
+      .catch((e) => renderWalksList("<p class='walks-empty'>Couldn't load: " + e.message + "</p>"));
+  }
+  function renderWalksList(walks) {
+    const list = $("walksList");
+    if (typeof walks === "string") { list.innerHTML = walks; return; }
+    if (!walks.length) { list.innerHTML = "<p class='walks-empty'>You haven't published any walks yet.</p>"; return; }
+    list.innerHTML = "";
+    for (const w of walks) {
+      const item = el("div", "walk-item");
+      const info = el("div", "info");
+      info.innerHTML = `<h4></h4><div class="meta"></div>`;
+      info.querySelector("h4").textContent = w.name || w.id;
+      info.querySelector(".meta").textContent =
+        `${w.creator ? w.creator + " · " : ""}${w.shapeCount || 0} areas · ${w.sizeBytes ? fmtBytes(w.sizeBytes) : ""} · ${(w.updatedAt || "").slice(0, 10)}`;
+      const actions = el("div", "actions");
+      const dl = el("button", null, "⇩ Download"); dl.onclick = () => downloadWalkZip(w);
+      const load = el("button", null, "✎ Load into editor"); load.onclick = () => loadWalkIntoEditor(w);
+      const del = el("button", "danger", "🗑 Delete"); del.onclick = () => deleteWalkFromServer(w, del);
+      actions.append(dl, load, del);
+      item.append(info, actions);
+      list.append(item);
+    }
+  }
+  async function downloadWalkZip(w) {
+    try {
+      const r = await fetch(w.zipUrl, { cache: "no-store" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      downloadBlob(await r.blob(), (w.name || "soundwalk").replace(/[^\w.-]+/g, "_") + ".zip");
+    } catch (e) { toast("Download failed: " + e.message, "err"); }
+  }
+  async function loadWalkIntoEditor(w) {
+    if (dirty && !confirm("Loading this walk will replace your current editor document. Continue?")) return;
+    try {
+      const r = await fetch(w.zipUrl, { cache: "no-store" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      await importZip(await r.blob());
+      state.walkId = w.id;   // now editing an owned published walk → publish offers "Update existing"
+      $("walksModal").hidden = true;
+      toast(`Loaded “${w.name}”. Edit, then Publish → Update existing walk.`, "ok");
+    } catch (e) { toast("Load failed: " + e.message, "err"); }
+  }
+  async function deleteWalkFromServer(w, btn) {
+    if (!confirm(`Delete “${w.name}” from the app for everyone? This can’t be undone.`)) return;
+    const orig = btn.innerHTML; btn.disabled = true; btn.innerHTML = "…";
+    try {
+      const r = await fetch(CFG.publishApiUrl, {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + idToken, "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", walkId: w.id }),
+      });
+      if (!r.ok) throw new Error((await r.text().catch(() => "")) || ("HTTP " + r.status));
+      if (state.walkId === w.id) state.walkId = null;
+      toast(`Deleted “${w.name}”.`, "ok");
+      setTimeout(openWalksModal, 900);   // manifest rebuild is async; refresh shortly
+    } catch (e) { toast("Delete failed: " + e.message, "err"); btn.disabled = false; btn.innerHTML = orig; }
+  }
+
   $("pubClose").onclick = closePublishModal;
   $("pubCancel").onclick = closePublishModal;
   $("pubConfirm").onchange = updatePubGo;
-  $("pubGo").onclick = runPublish;
+  $("pubGo").onclick = () => runPublish("new");
+  $("pubUpdate").onclick = () => runPublish("update");
   $("successClose").onclick = () => { $("successModal").hidden = true; };
-  $("successOk").onclick = () => { $("successModal").hidden = true; };
+  $("successDownload").onclick = downloadQr;
+  $("walksClose").onclick = () => { $("walksModal").hidden = true; };
   initAuth();
 
   setMode("edit");

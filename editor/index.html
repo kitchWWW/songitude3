@@ -22,10 +22,16 @@
 
     <div class="io-buttons">
       <span id="accountEmail" class="account-email" hidden></span>
-      <button id="importBtn">⇪ Import .zip</button>
       <input id="importInput" type="file" accept=".zip" hidden />
-      <button id="exportBtn" class="primary">⇩ Export .zip</button>
-      <button id="publishBtn" class="publish" hidden>☁ Publish to app</button>
+      <div class="menu-wrap">
+        <button id="menuBtn" class="primary">☰ Menu ▾</button>
+        <div id="menu" class="menu" hidden>
+          <button id="mImport">⇪ Import .zip</button>
+          <button id="mExport">⇩ Export .zip</button>
+          <button id="mWalks" hidden>🗂 My walks</button>
+          <button id="mPublish" class="menu-publish" hidden>☁ Publish to app</button>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -39,11 +45,13 @@
       </div>
       <div id="listenToolbar" class="toolbar" hidden>
         <span class="hint">Click the map to walk your virtual listener there.</span>
-        <div class="mode-switch" id="listenSpeed" role="tablist" aria-label="Move speed">
-          <button data-speed="walking" class="active">🚶 Walk</button>
-          <button data-speed="running">🏃 Run</button>
-          <button data-speed="teleport">⚡ Teleport</button>
-        </div>
+        <select id="listenSpeed" class="speed-select" aria-label="Move speed">
+          <option value="walking">🚶 Walk</option>
+          <option value="running">🏃 Run</option>
+          <option value="biking">🚲 Bike</option>
+          <option value="driving">🚗 Drive</option>
+          <option value="teleport">⚡ Teleport</option>
+        </select>
         <span class="listener-readout" id="listenerReadout">No listener placed</span>
       </div>
       <div id="map"></div>
@@ -131,6 +139,7 @@
       </div>
       <div class="modal-foot">
         <button id="pubCancel">Cancel</button>
+        <button id="pubUpdate" class="publish" hidden disabled>⟳ Update existing walk</button>
         <button id="pubGo" class="publish" disabled>☁ Publish</button>
       </div>
     </div>
@@ -142,10 +151,22 @@
       <div class="success-icon">✓</div>
       <h2 style="margin:0 0 6px">Published!</h2>
       <p id="successMsg" class="success-msg"></p>
-      <canvas id="successQr" width="180" height="180" class="success-qr"></canvas>
+      <img id="successQr" class="success-qr" alt="QR code" />
       <p class="success-qrcap">Scan with an iPhone that has the Songitude app to open this walk.</p>
       <a id="successLink" class="success-link" target="_blank" rel="noopener"></a>
-      <button id="successOk" class="primary" style="margin-top:16px">Done</button>
+      <button id="successDownload" class="primary" style="margin-top:16px">⬇ Download QR code</button>
+    </div>
+  </div>
+
+  <div id="walksModal" class="modal-overlay" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h2>My sound walks</h2>
+        <button class="modal-x" id="walksClose" title="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="walksList" class="walks-list"></div>
+      </div>
     </div>
   </div>
 

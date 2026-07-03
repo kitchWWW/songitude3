@@ -74,13 +74,18 @@ enum WalkDownloader {
             .appendingPathComponent("walks/\(id)", isDirectory: true)
     }
     static func isDownloaded(_ id: String) -> Bool {
-        FileManager.default.fileExists(atPath: cacheDir(for: id).appendingPathComponent("map.json").path)
+        // A ".complete" marker is written only after every file has downloaded.
+        FileManager.default.fileExists(atPath: cacheDir(for: id).appendingPathComponent(".complete").path)
+    }
+    static func deleteCache(_ id: String) {
+        try? FileManager.default.removeItem(at: cacheDir(for: id))
     }
 
     /// Loads an already-downloaded walk from cache (nil if not fully present).
     static func cachedExperience(_ id: String) -> Experience? {
         let dir = cacheDir(for: id)
-        guard let data = try? Data(contentsOf: dir.appendingPathComponent("map.json")),
+        guard isDownloaded(id),
+              let data = try? Data(contentsOf: dir.appendingPathComponent("map.json")),
               let map = try? JSONDecoder().decode(SoundMap.self, from: data) else { return nil }
         return Experience(id: id, directory: dir, map: map)
     }
@@ -115,6 +120,7 @@ enum WalkDownloader {
                     let done = Double(i + 1) / Double(max(1, list.count))
                     DispatchQueue.main.async { progress(done) }
                 }
+                try? Data().write(to: dir.appendingPathComponent(".complete"))   // mark fully downloaded
                 let exp = Experience(id: walk.id, directory: dir, map: map)
                 DispatchQueue.main.async { completion(.success(exp)) }
             } catch {

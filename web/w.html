@@ -33,8 +33,8 @@
       <p class="creator" id="creator"></p>
       <p class="about" id="about">This link opens a Songitude sound walk. Install the Songitude
         app on your iPhone, then scan or tap again to load it automatically.</p>
-      <a class="btn" href="/">About Songitude</a>
-      <a class="btn ghost" href="/editor/index.html">Open the editor</a>
+      <a class="btn" id="webplayBtn" href="/listen/index.html">▶ Play in the web player</a>
+      <a class="btn ghost" href="/">About Songitude</a>
     </div>
     <p class="note">If you have the app installed, this should have opened automatically.</p>
   </div>
@@ -44,6 +44,7 @@
     (async () => {
       const id = new URLSearchParams(location.search).get("walk");
       if (!id) return;
+      document.getElementById("webplayBtn").href = "/listen/index.html?walk=" + encodeURIComponent(id);
       try {
         const r = await fetch("https://songitude-walks.s3.amazonaws.com/walks/manifest.json", { cache: "no-store" });
         const m = await r.json();
