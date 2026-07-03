@@ -76,7 +76,7 @@ input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accen
 .brand .sub { color: var(--muted); font-weight: 400; }
 .brand .dot {
   width: 14px; height: 14px; border-radius: 50%;
-  background: conic-gradient(from 0deg, #ff5b6e, #ffa94d, #35c98b, #5b8cff, #7c5cff, #ff5b6e);
+  background: url("/icon.svg") center/contain no-repeat;
 }
 .mode-switch { display: flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px; padding: 3px; }
 .mode-switch button { border: none; background: transparent; border-radius: 6px; }
@@ -228,7 +228,7 @@ button.publish:hover { background: #5c3fe0; }
 .login-card h2 { margin: 4px 0 6px; }
 .login-card p { color: var(--muted); margin: 0 0 22px; }
 .login-dot { width: 52px; height: 52px; border-radius: 50%; margin: 0 auto 14px;
-  background: conic-gradient(from 0deg, #ff5b6e, #ffa94d, #35c98b, #5b8cff, #7c5cff, #ff5b6e); }
+  background: url("/icon.svg") center/contain no-repeat; }
 #gbtn { display: flex; justify-content: center; }
 .gate-error { margin-top: 18px; padding: 12px 14px; border-radius: 10px; font-size: 13px; line-height: 1.5;
   color: #7a2130; background: #fdecef; border: 1px solid #f6c9d1; }

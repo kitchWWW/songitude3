@@ -16,10 +16,10 @@ struct OnboardingView: View {
 
             VStack(spacing: 24) {
                 Spacer()
-                Circle()
-                    .fill(AngularGradient(gradient: Gradient(colors: [.red, .orange, .green, .blue, .purple, .red]),
-                                          center: .center))
-                    .frame(width: 96, height: 96)
+                Image("AppLogo")
+                    .resizable().scaledToFit()
+                    .frame(width: 100, height: 100)
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                     .shadow(radius: 20)
 
                 Text("Welcome to\nSongitude")
