@@ -113,6 +113,7 @@
       c.classList.toggle("selected", state.selectedIds.has(c.dataset.id)));
     for (const s of state.shapes) if (s.layer) s.layer.setStyle({ weight: state.selectedIds.has(s.id) ? 4 : 2 });
     updateBulkBar();
+    refreshEditHandles();
   }
   function scrollToCard(id) {
     const card = document.querySelector(`.card[data-id="${id}"]`);
@@ -181,6 +182,7 @@
       if (Math.abs(dLat) > 1e-12 || Math.abs(dLng) > 1e-12) moved = true;
       last = ev.latlng;
       for (const s of group) translateShape(s, dLat, dLng);
+      for (const h of editHandles) { const p = h.getLatLng(); h.setLatLng([p.lat + dLat, p.lng + dLng]); }
     };
     const onUp = () => {
       map.off("mousemove", onMove);
@@ -194,6 +196,64 @@
     };
     map.on("mousemove", onMove);
     map.once("mouseup", onUp);
+  }
+
+  // ---- vertex / radius editing handles (single selection) ---------------
+  let editHandles = [];
+  function clearEditHandles() {
+    if (!editHandles.length) return;
+    editHandles.forEach((h) => map.removeLayer(h));
+    editHandles = [];
+  }
+  function handleIcon(kind, color) {
+    const style = kind === "radius" ? `background:#fff;box-shadow:0 0 0 2px ${color}` : `background:${color}`;
+    return L.divIcon({ className: "edit-handle " + kind, html: `<i style="${style}"></i>`,
+                       iconSize: [15, 15], iconAnchor: [7.5, 7.5] });
+  }
+  // A point `dist` metres from [lat,lng] along `bearing`° — used to seat the circle's radius grip.
+  function destPoint([lat, lng], dist, bearing) {
+    const R = 6378137, br = bearing * Math.PI / 180, dr = dist / R;
+    const la1 = lat * Math.PI / 180, ln1 = lng * Math.PI / 180;
+    const la2 = Math.asin(Math.sin(la1) * Math.cos(dr) + Math.cos(la1) * Math.sin(dr) * Math.cos(br));
+    const ln2 = ln1 + Math.atan2(Math.sin(br) * Math.sin(dr) * Math.cos(la1),
+                                 Math.cos(dr) - Math.sin(la1) * Math.sin(la2));
+    return [la2 * 180 / Math.PI, ln2 * 180 / Math.PI];
+  }
+  function newHandle(latlng, kind, color) {
+    return L.marker(latlng, { icon: handleIcon(kind, color), draggable: true, keyboard: false,
+                              zIndexOffset: 1200 }).addTo(map);
+  }
+  // Draggable handles for the single selected shape: polygon vertices, or a circle's centre
+  // plus a grip on its perimeter (random bearing) that sets the radius.
+  function refreshEditHandles() {
+    clearEditHandles();
+    if (state.mode !== "edit" || draw || state.selectedIds.size !== 1) return;
+    const s = shapeById([...state.selectedIds][0]);
+    if (!s || !s.layer) return;
+    if (s.type === "polygon") buildPolygonHandles(s);
+    else if (s.type === "circle") buildCircleHandles(s);
+  }
+  function buildPolygonHandles(s) {
+    s.points.forEach((pt, i) => {
+      const h = newHandle(pt, "vertex", s.color);
+      h.on("drag", () => { const ll = h.getLatLng(); s.points[i] = [ll.lat, ll.lng]; s.layer.setLatLngs(s.points); });
+      h.on("dragend", () => commit());
+      editHandles.push(h);
+    });
+  }
+  function buildCircleHandles(s) {
+    const ctr = newHandle(s.center, "center", s.color);
+    const grip = newHandle(destPoint(s.center, s.radius, Math.random() * 360), "radius", s.color);
+    ctr.on("drag", () => {
+      const ll = ctr.getLatLng();
+      const dLat = ll.lat - s.center[0], dLng = ll.lng - s.center[1];
+      s.center = [ll.lat, ll.lng]; s.layer.setLatLng(s.center);
+      const g = grip.getLatLng(); grip.setLatLng([g.lat + dLat, g.lng + dLng]);
+    });
+    grip.on("drag", () => { s.radius = Math.max(3, map.distance(s.center, grip.getLatLng())); s.layer.setRadius(s.radius); });
+    ctr.on("dragend", () => commit());
+    grip.on("dragend", () => commit());
+    editHandles.push(ctr, grip);
   }
 
   // ---- redraw an existing polygon ---------------------------------------
@@ -229,11 +289,12 @@
       $("tool" + t).classList.toggle("active", tool === t.toLowerCase()));
     const hints = {
       select: "",
-      polygon: "Click to drop each vertex. Click the first point again to close.",
+      polygon: "Click to drop each vertex. Click the first point to close. Backspace undoes the last point.",
       circle: "Click to set the center, then click again to set the radius.",
     };
     $("toolHint").textContent = hints[tool];
     mapEl.style.cursor = tool === "select" ? "" : "crosshair";
+    refreshEditHandles();
   }
 
   function cancelDraw() {
@@ -294,6 +355,7 @@
 
   function polygonClick(latlng) {
     if (!draw) {
+      clearEditHandles();
       draw = { kind: "polygon", points: [], temp: [], rubber: null };
       draw.rubber = L.polyline([], { color: SHAPE_COLORS.polygon, weight: 2, dashArray: "5,5" }).addTo(map);
     }
@@ -307,6 +369,16 @@
     const vtx = L.circleMarker(latlng, { radius: 4, color: SHAPE_COLORS.polygon, fillColor: "#fff", fillOpacity: 1 }).addTo(map);
     draw.temp.push(vtx);
     draw.rubber.setLatLngs(draw.points);
+  }
+
+  // Backspace while placing a polygon: pop the most recent vertex off the in-progress stack.
+  function undoLastPolygonPoint() {
+    if (!draw || draw.kind !== "polygon" || !draw.points.length) return;
+    draw.points.pop();
+    const vtx = draw.temp.pop();
+    if (vtx) map.removeLayer(vtx);
+    if (draw.rubber) draw.rubber.setLatLngs(draw.points);
+    toast(draw.points.length ? "Removed the last point." : "All points removed — click to start again.", "ok");
   }
 
   function finishPolygon() {
@@ -330,6 +402,7 @@
 
   function circleClick(latlng) {
     if (!draw) {
+      clearEditHandles();
       draw = { kind: "circle", center: latlng, previewRadius: 0, temp: [] };
       draw.circle = L.circle(latlng, { radius: 0, color: SHAPE_COLORS.circle, weight: 2, dashArray: "5,5", fillOpacity: 0.1 }).addTo(map);
       draw.temp.push(draw.circle);
@@ -913,6 +986,7 @@
       setTool("select");
     } else {
       cancelDraw();
+      clearEditHandles();
       mapEl.style.cursor = "crosshair";
       audioCtx(); // unlock on user gesture
       for (const s of state.shapes) s._rt = { inside: false, armed: true, source: null, gain: null };
@@ -1129,6 +1203,7 @@
     updateAlbumArtUI();
     state.selectedIds = new Set(snap.selected || []);
     renderSide();
+    applySelection();   // restore outline weights + editing handles for the selected shape
   }
   // Record a new history entry — call AFTER a change has been applied to state.
   function commit() {
@@ -1191,6 +1266,10 @@
     if (e.key !== "Delete" && e.key !== "Backspace") return;
     const t = document.activeElement;
     if (t && /INPUT|TEXTAREA|SELECT/.test(t.tagName)) return;
+    // While placing a polygon, Backspace removes the last dropped point (not the selected shape).
+    if (e.key === "Backspace" && draw && draw.kind === "polygon" && draw.points.length) {
+      e.preventDefault(); undoLastPolygonPoint(); return;
+    }
     if (state.mode === "edit" && state.selectedIds.size) { e.preventDefault(); bulkDelete(); }
   });
 
