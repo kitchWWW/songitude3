@@ -615,13 +615,19 @@
       card.append(row);
     }
 
-    // polygon: redraw button
+    // shape-editing actions: drag-handles (all shapes) + polygon redraw
+    const actions = el("div", "shape-actions");
+    const editBtn = el("button", "edit-btn", "✎ Edit shape");
+    editBtn.title = "Show draggable handles to fine-tune this shape's points";
+    editBtn.onclick = (e) => { e.stopPropagation(); selectOnly(s.id); toast("Drag the highlighted handles to reshape.", "ok"); };
+    actions.append(editBtn);
     if (s.type === "polygon") {
-      const redraw = el("button", "redraw-btn", "✎ Redraw shape");
-      redraw.title = "Re-place this polygon's points on the map";
+      const redraw = el("button", "redraw-btn", "⟲ Redraw shape");
+      redraw.title = "Re-place this polygon's points from scratch on the map";
       redraw.onclick = (e) => { e.stopPropagation(); startRedraw(s.id); };
-      card.append(redraw);
+      actions.append(redraw);
     }
+    card.append(actions);
     return card;
   }
 
