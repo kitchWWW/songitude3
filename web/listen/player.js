@@ -7,6 +7,13 @@
   const MANIFEST_URL = WALKS_BASE + "/walks/manifest.json";
   const PRELOAD_M = 300, EVICT_M = 600;   // proximity residency thresholds (metres)
 
+  // Dialogue shapes show playback state (one plays at a time; the rest queue). Colors come from the
+  // walk's map.json (authored in the editor); these are the fallbacks. Opacity gives each state its look.
+  const DEFAULT_DIALOGUE_COLORS = { unplayed: "#8a63d2", queued: "#f5a623", playing: "#2ecc71", finished: "#ffffff" };
+  const DIALOGUE_STATE_OPACITY = { unplayed: 0.2, queued: 0.42, playing: 0.6, finished: 0.08 };
+  const INTRO_GATE_MS = 60 * 60 * 1000;   // don't replay a walk's intro within 1 hour (resume window)
+  const DONE_DELAY_MS = 30 * 1000;        // show the "All done?" button this long after play starts
+
   const $ = (id) => document.getElementById(id);
   const walksListEl = $("walksList");
 
@@ -22,6 +29,9 @@
   let running = false, syncedStarted = false, userCoord = null;
   let manifestWalks = [];
   let shapeLayers = new Map();
+  let dialogueQueue = [], dialoguePlaying = null;   // one dialogue plays at a time; others wait in line
+  let outroActive = false, doneTimer = null, introVoice = null, exitVoice = null;   // intro/exit (walk-level) clips
+  const dColor = (st) => (walk && walk.map.dialogueColors && walk.map.dialogueColors[st]) || DEFAULT_DIALOGUE_COLORS[st];
 
   // ---- geometry ----
   const R = 6371000, toR = (x) => x * Math.PI / 180;
@@ -70,13 +80,55 @@
     g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(g.gain.value, t);
     g.gain.linearRampToValueAtTime(Math.max(0.0001, target), t + Math.max(0.01, dur));
   }
+  // A crossfade loop: overlapping copies of `buf` under `destGain`, each fading in as the previous
+  // fades out. Returns an object with stop(when), so it drops into the same slot as a looping source.
+  function makeCrossfadeLoop(buf, crossfade, destGain) {
+    const D = buf.duration;
+    const C = Math.min(Math.max(0.05, crossfade || 1), D * 0.5);   // clamp to ≤ half the clip
+    const period = Math.max(0.05, D - C);
+    const active = new Set();
+    let nextStart = ctx.currentTime, first = true, stopAt = Infinity, torn = false;
+    const scheduleCopy = (startAt) => {
+      const src = ctx.createBufferSource(); src.buffer = buf;
+      const cg = ctx.createGain();
+      if (first) { cg.gain.setValueAtTime(1, startAt); first = false; }
+      else { cg.gain.setValueAtTime(0.0001, startAt); cg.gain.linearRampToValueAtTime(1, startAt + C); }
+      cg.gain.setValueAtTime(1, startAt + D - C);
+      cg.gain.linearRampToValueAtTime(0.0001, startAt + D);
+      src.connect(cg).connect(destGain);
+      src.start(startAt); src.stop(startAt + D + 0.05);
+      active.add(src); src.onended = () => active.delete(src);
+    };
+    const tick = () => {
+      if (torn) return;
+      const ahead = Math.min(ctx.currentTime + 0.4, stopAt);
+      while (nextStart < ahead) { scheduleCopy(nextStart); nextStart += period; }
+    };
+    tick();
+    const timer = setInterval(tick, 150);
+    const teardown = () => { if (torn) return; torn = true; clearInterval(timer); for (const src of active) { try { src.stop(ctx.currentTime); } catch (_) {} } };
+    return {
+      stop(when) {
+        const at = (typeof when === "number" && when > ctx.currentTime) ? when : ctx.currentTime;
+        stopAt = Math.min(stopAt, at);
+        tick();
+        setTimeout(teardown, Math.max(0, (stopAt - ctx.currentTime) * 1000) + 80);
+      },
+    };
+  }
   function startLoop(s, c) {
     const buf = buffers.get(s.audioFile); if (!buf) return;
-    const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
     const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, ctx.currentTime);
     g.gain.linearRampToValueAtTime(Math.max(0.0001, targetGain(s, c)), ctx.currentTime + Math.max(0.01, s.fadeIn));
-    src.connect(g).connect(masterGain); src.start();
-    s._rt.source = src; s._rt.gain = g;
+    g.connect(masterGain);
+    s._rt.gain = g;
+    if (s.loopMode === "crossfade") {
+      s._rt.source = makeCrossfadeLoop(buf, s.crossfade, g);
+    } else {
+      const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+      src.connect(g); src.start();
+      s._rt.source = src;
+    }
   }
   function updateLoopGain(s, c) {
     if (s.type === "circle" && s.falloff && s.falloff !== "none" && s._rt.gain) rampGain(s._rt.gain, targetGain(s, c), 0.12);
@@ -95,13 +147,89 @@
     src.onended = () => { if (s._rt && s._rt.source === src) { s._rt.source = null; s._rt.gain = null; reflectSounding(); } };
     src.start(); s._rt.source = src; s._rt.gain = g;
   }
-  function duckDialogues(exceptId) {
+  // Dialogue: play once, one at a time. Next queued dialogue starts when the current one finishes.
+  async function advanceDialogue() {
+    if (dialoguePlaying) return;
+    const nextId = dialogueQueue.shift();
+    if (nextId === undefined) return;
+    const s = shapes.find((x) => x.id === nextId);
+    if (!s) return advanceDialogue();
+    dialoguePlaying = s.id;
+    s._rt.dstate = "playing";
+    reflectSounding();
+    if (s.audioFile && !buffers.has(s.audioFile)) await ensureBuffer(s.audioFile);
+    if (dialoguePlaying !== s.id) return;                     // stopped while the clip loaded
+    const buf = s.audioFile ? buffers.get(s.audioFile) : null;
+    if (!buf) return onDialogueFinished(s);
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const g = ctx.createGain(); g.gain.value = s.gain; src.connect(g).connect(masterGain);
+    src.onended = () => { if (s._rt && s._rt.source === src) { s._rt.source = null; s._rt.gain = null; onDialogueFinished(s); } };
+    src.start(); s._rt.source = src; s._rt.gain = g;
+    reflectSounding();
+  }
+  function onDialogueFinished(s) {
+    if (dialoguePlaying === s.id) dialoguePlaying = null;
+    if (s._rt) { s._rt.source = null; s._rt.gain = null; s._rt.dstate = "finished"; }
+    reflectSounding();
+    advanceDialogue();
+  }
+
+  // ---- intro / exit (walk-level) clips ----
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  function playClipOnce(buf, gain, onended) {
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const g = ctx.createGain(); g.gain.value = gain; src.connect(g).connect(masterGain);
+    if (onended) src.onended = onended;
+    src.start();
+    return { src, g };
+  }
+  // Fade + stop every sounding voice matching `pick`, over `dur` seconds.
+  function fadeVoices(dur, pick) {
+    const t = ctx.currentTime;
     for (const s of shapes) {
-      if (s.mode !== "dialogue" || s.id === exceptId || !s._rt || !s._rt.source) continue;
-      rampGain(s._rt.gain, 0, 0.6);
-      try { s._rt.source.stop(ctx.currentTime + 0.65); } catch (_) {}
+      if (!(s._rt && s._rt.source) || !pick(s)) continue;
+      const g = s._rt.gain;
+      g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(g.gain.value, t);
+      g.gain.linearRampToValueAtTime(0.0001, t + dur);
+      try { s._rt.source.stop(t + dur + 0.05); } catch (_) {}
       s._rt.source = null; s._rt.gain = null;
     }
+  }
+  async function maybePlayIntro() {
+    const file = walk && walk.map.intro;
+    if (!file) return;
+    const key = "songitude.intro." + walk.id;
+    const last = parseInt(localStorage.getItem(key) || "0", 10);
+    if (Date.now() - last < INTRO_GATE_MS) return;   // resumed recently → don't replay
+    await ensureBuffer(file);
+    const buf = buffers.get(file); if (!buf || !running) return;
+    try { localStorage.setItem(key, String(Date.now())); } catch (_) {}
+    if (introVoice) { try { introVoice.src.stop(); } catch (_) {} }
+    introVoice = playClipOnce(buf, walk.map.introGain ?? 1, () => { introVoice = null; });
+  }
+  // End-of-walk: fade dialogue (1s) → exit clip → fade everything (5s) → stop the session.
+  async function endSession() {
+    if (outroActive || !running) return;
+    outroActive = true;
+    $("doneBtn").disabled = true;
+    setStatus("Wrapping up…");
+    fadeVoices(1.0, (s) => s.mode === "dialogue");
+    dialogueQueue = []; dialoguePlaying = null;
+    await sleep(1000);
+    if (!outroActive) return;
+    const exitFile = walk && walk.map.exit;
+    if (exitFile) {
+      await ensureBuffer(exitFile);
+      const buf = buffers.get(exitFile);
+      if (buf) await new Promise((resolve) => { exitVoice = playClipOnce(buf, walk.map.exitGain ?? 1, () => { exitVoice = null; resolve(); }); });
+    }
+    if (!outroActive) return;
+    fadeVoices(5.0, () => true);   // everything else fades out
+    await sleep(5000);
+    if (!outroActive) return;
+    outroActive = false;
+    stop();
+    setStatus("That's the end of the walk. 🎧");
   }
   function startSyncedIfReady() {
     if (!running || syncedStarted) return;
@@ -111,7 +239,7 @@
     for (const s of shapes) {
       if (s.mode !== "syncedLoop" || !s.audioFile || (s._rt && s._rt.source)) continue;
       const buf = buffers.get(s.audioFile); if (!buf) continue;
-      if (!s._rt) s._rt = { inside: false, armed: true, source: null, gain: null };
+      if (!s._rt) s._rt = { inside: false, armed: true, source: null, gain: null, dstate: "unplayed" };
       const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
       const g = ctx.createGain(); g.gain.setValueAtTime(0, ctx.currentTime);
       src.connect(g).connect(masterGain); src.start(startAt);
@@ -142,14 +270,14 @@
   }
 
   function updateLocation(c) {
-    if (!running) return;
+    if (!running || outroActive) return;   // freeze location-driven playback during the outro
     userCoord = c;
     updateResidency(c);
     startSyncedIfReady();
     const inside = new Set();
     for (const s of shapes) if (contains(s, c)) inside.add(s.id);
     for (const s of shapes) {
-      if (!s._rt) s._rt = { inside: false, armed: true, source: null, gain: null };
+      if (!s._rt) s._rt = { inside: false, armed: true, source: null, gain: null, dstate: "unplayed" };
       const rt = s._rt, nowIn = inside.has(s.id), rising = nowIn && !rt.inside;
       if (s.mode === "loop") {
         if (nowIn && !rt.source) startLoop(s, c);
@@ -161,9 +289,11 @@
           const dur = rising ? Math.max(0.02, s.fadeIn) : (!nowIn && rt.inside ? Math.max(0.02, s.fadeOut) : 0.12);
           rampGain(rt.gain, target, dur);
         }
-      } else {
-        if (rising && rt.armed) { if (s.mode === "dialogue") duckDialogues(s.id); playOnce(s); rt.armed = false; }
+      } else if (s.mode === "oneshot") {
+        if (rising && rt.armed) { playOnce(s); rt.armed = false; }
         if (!nowIn) rt.armed = true;
+      } else { // dialogue: play once ever; queue behind any dialogue already playing
+        if (rising && rt.dstate === "unplayed") { rt.dstate = "queued"; dialogueQueue.push(s.id); advanceDialogue(); }
       }
       rt.inside = nowIn;
     }
@@ -173,8 +303,14 @@
   function reflectSounding() {
     for (const s of shapes) {
       const layer = shapeLayers.get(s.id); if (!layer) continue;
-      const on = !!(s._rt && s._rt.source && (!s._rt.gain || s._rt.gain.gain.value > 0.01));
-      layer.setStyle({ fillOpacity: on ? 0.5 : 0.2, weight: on ? 3 : 2 });
+      if (s.mode === "dialogue") {
+        const st = (running && s._rt && s._rt.dstate) || "unplayed";
+        const col = dColor(st);
+        layer.setStyle({ color: col, fillColor: col, fillOpacity: DIALOGUE_STATE_OPACITY[st], weight: st === "playing" ? 3 : 2 });
+      } else {
+        const on = !!(s._rt && s._rt.source && (!s._rt.gain || s._rt.gain.gain.value > 0.01));
+        layer.setStyle({ fillOpacity: on ? 0.5 : 0.2, weight: on ? 3 : 2 });
+      }
     }
   }
 
@@ -182,7 +318,9 @@
   function drawShapes() {
     shapeLayers.forEach((l) => lmap.removeLayer(l)); shapeLayers.clear();
     for (const s of shapes) {
-      const style = { color: s.color || "#4363d8", weight: 2, fillColor: s.color || "#4363d8", fillOpacity: 0.2 };
+      const base = s.mode === "dialogue" ? dColor("unplayed") : (s.color || "#4363d8");
+      const fo = s.mode === "dialogue" ? DIALOGUE_STATE_OPACITY.unplayed : 0.2;
+      const style = { color: base, weight: 2, fillColor: base, fillOpacity: fo };
       let layer = null;
       if (s.type === "circle" && s.center && s.radius != null) layer = L.circle(s.center, { radius: s.radius, ...style });
       else if (s.type === "polygon" && s.points && s.points.length >= 3) layer = L.polygon(s.points, style);
@@ -247,19 +385,32 @@
     if (!ctx) { ctx = new (window.AudioContext || window.webkitAudioContext)(); masterGain = ctx.createGain(); masterGain.connect(ctx.destination); }
     if (ctx.state === "suspended") await ctx.resume();
     running = true; syncedStarted = false; userCoord = null;
-    for (const s of shapes) s._rt = { inside: false, armed: true, source: null, gain: null };
+    dialogueQueue = []; dialoguePlaying = null;
+    for (const s of shapes) s._rt = { inside: false, armed: true, source: null, gain: null, dstate: "unplayed" };
     syncedFiles().forEach(ensureBuffer);   // synced loops load immediately, start when all ready
     startSyncedIfReady();
     startWatch();
     acquireWake(); setMediaPlaying(true);
+    // Reset the end-session UI and arm the "All done?" button; play the intro (gated per walk).
+    outroActive = false;
+    $("doneBtn").hidden = true; $("doneBtn").disabled = false;
+    clearTimeout(doneTimer);
+    doneTimer = setTimeout(() => { if (running) $("doneBtn").hidden = false; }, DONE_DELAY_MS);
+    maybePlayIntro();
     renderPlay(); setStatus("Listening — keep this page open and your screen on. 🎧");
   }
   function stop() {
     running = false; syncedStarted = false;
     stopWatch(); virtual = null;
+    dialogueQueue = []; dialoguePlaying = null;
+    outroActive = false;
+    clearTimeout(doneTimer); doneTimer = null;
+    $("doneBtn").hidden = true; $("doneBtn").disabled = false;
+    if (introVoice) { try { introVoice.src.stop(); } catch (_) {} introVoice = null; }
+    if (exitVoice) { try { exitVoice.src.stop(); } catch (_) {} exitVoice = null; }
     for (const s of shapes) {
       if (s._rt && s._rt.source) { try { s._rt.source.stop(); } catch (_) {} s._rt.source = null; s._rt.gain = null; }
-      if (s._rt) { s._rt.inside = false; s._rt.armed = true; }
+      if (s._rt) { s._rt.inside = false; s._rt.armed = true; s._rt.dstate = "unplayed"; }
     }
     releaseWake(); setMediaPlaying(false); reflectSounding(); renderPlay(); setStatus("Paused.");
   }
@@ -308,6 +459,7 @@
       walk = { id, base, map: mapData };
       shapes = (mapData.shapes || []).map((s) => ({ ...s, _rt: null }));
       buffers.clear(); loadingFiles.clear(); syncedStarted = false;
+      dialogueQueue = []; dialoguePlaying = null;
       drawShapes();
       if (Array.isArray(mapData.center)) lmap.setView(mapData.center, mapData.zoom || 16);
       $("titleBtn").textContent = (mapData.name || "Sound walk") + " ▾";
@@ -330,6 +482,7 @@
 
   // ---- wiring ----
   $("playBtn").onclick = toggle;
+  $("doneBtn").onclick = endSession;
   $("browseBtn").onclick = openPicker;
   $("titleBtn").onclick = openPicker;
   $("welcomeBrowse").onclick = openPicker;

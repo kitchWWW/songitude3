@@ -183,6 +183,30 @@ main { flex: 1; display: flex; min-height: 0; }
 .card.sounding { box-shadow: 0 0 0 1px var(--ok), var(--shadow); }
 .card-head { display: flex; align-items: center; gap: 10px; }
 .swatch { width: 20px; height: 20px; border-radius: 6px; border: 2px solid rgba(0,0,0,.15); cursor: pointer; flex: 0 0 auto; padding: 0; }
+.swatch-static { cursor: default; }
+
+/* Details tab: per-walk dialogue state colors */
+.dialogue-colors { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.dcolor { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.dcolor input[type="color"] { width: 34px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; flex: 0 0 auto; }
+
+/* Details tab: intro / exit clip pickers */
+.clip-pick { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.clip-choose { border: 1.5px dashed #c2cadd; border-radius: 8px; padding: 6px 12px; background: var(--panel-2); color: var(--muted); cursor: pointer; }
+.clip-choose:hover { border-color: var(--accent); color: var(--text); }
+.clip-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
+.clip-play, .clip-clear, .clip-dl { border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 3px 8px; cursor: pointer; }
+.clip-gain { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.clip-gain input { width: 58px; font: inherit; }
+
+/* Listen toolbar: intro / outro trigger buttons */
+.listen-action { border: 1px solid var(--line); background: #fff; border-radius: 7px; padding: 5px 10px; cursor: pointer; }
+.listen-action:hover:not(:disabled) { border-color: var(--accent); }
+.listen-action:disabled { opacity: .45; cursor: not-allowed; }
+
+/* Loop card: crossfade checkbox */
+.checkbox-field { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; }
+.checkbox-field input { cursor: pointer; }
 .card-head input.name { flex: 1; background: transparent; border: none; border-bottom: 1px solid transparent; border-radius: 0; padding: 3px 2px; font-weight: 600; }
 .card-head input.name:hover { border-bottom-color: var(--line); }
 .card-head input.name:focus { border-bottom-color: var(--accent); outline: none; }

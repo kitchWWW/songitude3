@@ -19,7 +19,12 @@
     shapes: [],                // see makeShape()
     selectedIds: new Set(),    // multi-selection
     albumArt: null,            // { name, blob, url } | null
+    introAudio: null,          // walk-level intro clip filename (in audioStore), or null
+    introGain: 1.0,            // 0..1 playback level for the intro clip
+    exitAudio: null,           // walk-level exit/outro clip filename (in audioStore), or null
+    exitGain: 1.0,             // 0..1 playback level for the exit clip
     listenSpeed: "walking",    // "walking" | "running" | "teleport"
+    dialogueColors: null,      // per-walk dialogue state colors (set below)
   };
   // metres / second — walk, run, bike (~24 km/h), drive (~48 km/h). Teleport is instant.
   const LISTEN_SPEED = { walking: 1.4, running: 3.5, biking: 6.7, driving: 13.4 };
@@ -27,6 +32,15 @@
   // Fixed color per shape type so the map reads consistently: circles red, polygons blue.
   // (Individual shapes can still be recolored via the swatch.)
   const SHAPE_COLORS = { circle: "#e6194b", polygon: "#4363d8" };
+
+  // Dialogue shapes aren't colored individually — they show their playback state instead, using
+  // this per-walk palette (authored in the Details tab, saved in map.json). One dialogue plays at a
+  // time; the rest queue. Fixed fill opacities give "finished" its faded, see-through look.
+  const DIALOGUE_STATES = ["unplayed", "queued", "playing", "finished"];
+  const DEFAULT_DIALOGUE_COLORS = { unplayed: "#8a63d2", queued: "#f5a623", playing: "#2ecc71", finished: "#ffffff" };
+  const DIALOGUE_STATE_OPACITY = { unplayed: 0.25, queued: 0.42, playing: 0.6, finished: 0.08 };
+  state.dialogueColors = { ...DEFAULT_DIALOGUE_COLORS };
+  const dColor = (st) => (state.dialogueColors && state.dialogueColors[st]) || DEFAULT_DIALOGUE_COLORS[st];
   let shapeCounter = 0;
 
   // filename -> { blob, url }
@@ -62,10 +76,12 @@
       type,                          // "circle" | "polygon"
       color,
       audioFile: null,
-      mode: "loop",                  // "loop" | "oneshot" | "dialogue"
+      mode: "loop",                  // "loop" | "syncedLoop" | "oneshot" | "dialogue"
       gain: 1.0,
       fadeIn: 2.0,
       fadeOut: 3.0,
+      loopMode: "simple",            // loop only: "simple" | "crossfade"
+      crossfade: 1.0,                // seconds; overlap for crossfade loops
       falloff: "none",               // circle loops: "none" | "linear" | "exponential" | "edge"
       layer: null,
       _rt: null,                     // listen-mode runtime, see engine
@@ -76,9 +92,23 @@
     return shape;
   }
 
+  // A dialogue shape's current display state: its live playback state in listen mode, else "unplayed".
+  function dialogueState(shape) {
+    return (state.mode === "listen" && shape._rt && shape._rt.dstate) || "unplayed";
+  }
+  // Base map style for a shape (stroke/fill color + fill opacity), before selection/sounding tweaks.
+  function baseStyle(shape) {
+    if (shape.mode === "dialogue") {
+      const st = dialogueState(shape);
+      return { color: dColor(st), fillOpacity: DIALOGUE_STATE_OPACITY[st] };
+    }
+    return { color: shape.color, fillOpacity: 0.25 };
+  }
+
   function buildLayer(shape) {
     if (shape.layer) { map.removeLayer(shape.layer); shape.layer = null; }
-    const style = { color: shape.color, weight: 2, fillColor: shape.color, fillOpacity: 0.25 };
+    const b = baseStyle(shape);
+    const style = { color: b.color, weight: 2, fillColor: b.color, fillOpacity: b.fillOpacity };
     let layer;
     if (shape.type === "circle") {
       layer = L.circle(shape.center, { radius: shape.radius, ...style });
@@ -499,16 +529,25 @@
 
     // head: swatch, name, type badge, delete
     const head = el("div", "card-head");
-    const swatch = el("button", "swatch");
-    swatch.style.background = s.color;
-    swatch.title = "Change color";
-    swatch.onclick = (e) => {
-      e.stopPropagation();
-      openColorPopover(swatch, s.color, (color, done) => {
-        s.color = color; swatch.style.background = color; buildLayer(s);
-        if (done) commit();
-      });
-    };
+    let swatch;
+    if (s.mode === "dialogue") {
+      // Dialogue shapes are colored by playback state (see Details tab), not per-shape — show a
+      // static swatch of the "unplayed" color rather than a color picker.
+      swatch = el("span", "swatch swatch-static");
+      swatch.style.background = dColor("unplayed");
+      swatch.title = "Dialogue color is set by playback state (Details tab)";
+    } else {
+      swatch = el("button", "swatch");
+      swatch.style.background = s.color;
+      swatch.title = "Change color";
+      swatch.onclick = (e) => {
+        e.stopPropagation();
+        openColorPopover(swatch, s.color, (color, done) => {
+          s.color = color; swatch.style.background = color; buildLayer(s);
+          if (done) commit();
+        });
+      };
+    }
     const name = el("input", "name");
     name.value = s.name; name.spellcheck = false;
     name.oninput = () => { s.name = name.value; };
@@ -534,7 +573,10 @@
     if (s.audioFile) {
       const play = el("button", "preview-btn", "▶");
       play.onclick = (e) => { e.stopPropagation(); previewAudio(s.audioFile, play); };
-      dz.append(play);
+      const dl = el("button", "preview-btn", "⬇");
+      dl.title = "Download this audio file";
+      dl.onclick = (e) => { e.stopPropagation(); downloadAudio(s.audioFile); };
+      dz.append(play, dl);
     }
     dz.onclick = () => pickAudioFor(s);
     dz.ondragover = (e) => { e.preventDefault(); dz.classList.add("dragover"); };
@@ -557,7 +599,7 @@
     }
     modeSel.title = MODE_HELP[s.mode] || "";
     modeSel.onclick = (e) => e.stopPropagation();
-    modeSel.onchange = (e) => { e.stopPropagation(); s.mode = modeSel.value; renderSide(); commit(); };
+    modeSel.onchange = (e) => { e.stopPropagation(); s.mode = modeSel.value; buildLayer(s); renderSide(); commit(); };
     modeLab.append(modeSel); modeRow.append(modeLab);
     card.append(modeRow);
 
@@ -571,10 +613,31 @@
     }
     card.append(params);
 
+    // loop-only: simple vs crossfade loop (+ crossfade time when enabled)
+    if (s.mode === "loop") {
+      const row = el("div", "params");
+      const lab = el("label", "checkbox-field");
+      const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = s.loopMode === "crossfade";
+      cb.onclick = (e) => e.stopPropagation();
+      cb.onchange = (e) => { e.stopPropagation(); s.loopMode = cb.checked ? "crossfade" : "simple"; renderSide(); commit(); };
+      lab.title = "Overlap the loop point: a fresh copy fades in as the old one fades out (no seam click).";
+      lab.append(cb, el("span", null, " Crossfade loop"));
+      row.append(lab);
+      card.append(row);
+      if (s.loopMode === "crossfade") {
+        const cf = el("div", "params");
+        cf.append(numField("Crossfade (s)", s.crossfade, 0.1, 10, 0.1, (v) => { s.crossfade = v; }));
+        card.append(cf);
+      }
+    }
+
     // loop-seam preview (loop / synced loop with audio)
     if ((s.mode === "loop" || s.mode === "syncedLoop") && s.audioFile) {
-      const pl = el("button", "loopprev-btn", "↻ Preview loop");
-      pl.title = "Play the last 3s → first 3s (the loop point) on repeat, to catch clicks at the seam.";
+      const crossfade = s.mode === "loop" && s.loopMode === "crossfade";
+      const pl = el("button", "loopprev-btn", crossfade ? "↻ Preview crossfade" : "↻ Preview loop");
+      pl.title = crossfade
+        ? "Play the crossfade loop — the tail of one copy blending into the head of the next — on repeat."
+        : "Play the last 3s → first 3s (the loop point) on repeat, to catch clicks at the seam.";
       pl.onclick = (e) => { e.stopPropagation(); previewLoopSeam(s, pl); };
       card.append(pl);
     }
@@ -635,7 +698,7 @@
     loop: "Loops while you're inside; fades in on enter, fades out on exit. Layers with everything.",
     syncedLoop: "Starts with playback and loops in perfect sample-lock with every other synced loop, everywhere at once. Location only fades its volume up/down (it keeps running, silent, when you're outside).",
     oneshot: "Plays once on entry, always to completion. No fades. Re-arms after you leave.",
-    dialogue: "Plays through like a one-shot, but fades out if another dialogue starts.",
+    dialogue: "Plays through once, ever. If another dialogue is already playing, it queues and plays when that one finishes. Its color shows its state (set colors in Details).",
   };
 
   function numField(label, val, min, max, step, onChange) {
@@ -657,11 +720,15 @@
     input.click();
   }
 
+  // A shape still carrying its auto-assigned "Area N" name (vs. one the author has renamed).
+  function isDefaultAreaName(name) { return /^Area \d+$/.test(name || ""); }
   function assignAudio(shape, file) {
     if (audioStore.has(file.name)) URL.revokeObjectURL(audioStore.get(file.name).url);
     audioStore.set(file.name, { blob: file, url: URL.createObjectURL(file) });
     decoded.delete(file.name);
     shape.audioFile = file.name;
+    // If the area still has its default name, adopt the audio's filename (without extension).
+    if (isDefaultAreaName(shape.name)) shape.name = file.name.replace(/\.[^./\\]+$/, "");
     renderSide();
     commit();
     toast(`“${file.name}” assigned to ${shape.name}.`, "ok");
@@ -683,6 +750,16 @@
     const buf = await bufferFor(shape.audioFile);
     if (!buf) { toast("Couldn't decode that audio.", "err"); return; }
     const ctx = audioCtx();
+
+    // Crossfade loops: audition the real crossfade (tail of one copy blending into the next).
+    if (shape.mode === "loop" && shape.loopMode === "crossfade") {
+      const g = ctx.createGain(); g.gain.value = shape.gain; g.connect(ctx.destination);
+      const ctrl = makeCrossfadeLoop(buf, shape.crossfade, g);
+      loopPreview = { btn, src: ctrl, timer: null };
+      btn.classList.add("active"); btn.textContent = "■ Stop preview";
+      return;
+    }
+
     const sr = buf.sampleRate, chs = buf.numberOfChannels;
     const segN = Math.max(1, Math.min(Math.floor(3 * sr), Math.floor(buf.length / 2)));
     const preview = ctx.createBuffer(chs, segN * 2, sr);
@@ -702,6 +779,14 @@
       if (loopPreview) loopPreview.src = s;
     };
     play();
+  }
+
+  function downloadAudio(name) {
+    const rec = audioStore.get(name);
+    if (!rec) { toast("Audio not loaded.", "err"); return; }
+    const a = document.createElement("a");
+    a.href = rec.url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
   }
 
   let previewEl = null, previewBtn = null;
@@ -736,11 +821,61 @@
     return _ctx;
   }
 
+  // A crossfade loop: overlapping copies of `buf` scheduled under `destGain`. Each copy fades in
+  // over the crossfade window as the previous one fades out, so there's no seam. Returns an object
+  // exposing stop(when) so it drops into the same slots as a plain looping AudioBufferSourceNode.
+  function makeCrossfadeLoop(buf, crossfade, destGain) {
+    const ctx = audioCtx();
+    const D = buf.duration;
+    const C = Math.min(Math.max(0.05, crossfade || 1), D * 0.5);   // clamp to ≤ half the clip
+    const period = Math.max(0.05, D - C);
+    const active = new Set();
+    let nextStart = ctx.currentTime, first = true, stopAt = Infinity, torn = false;
+    const scheduleCopy = (startAt) => {
+      const src = ctx.createBufferSource(); src.buffer = buf;
+      const cg = ctx.createGain();
+      if (first) { cg.gain.setValueAtTime(1, startAt); first = false; }   // first copy starts full (no in-fade)
+      else { cg.gain.setValueAtTime(0.0001, startAt); cg.gain.linearRampToValueAtTime(1, startAt + C); }
+      cg.gain.setValueAtTime(1, startAt + D - C);
+      cg.gain.linearRampToValueAtTime(0.0001, startAt + D);
+      src.connect(cg).connect(destGain);
+      src.start(startAt); src.stop(startAt + D + 0.05);
+      active.add(src);
+      src.onended = () => active.delete(src);
+    };
+    const tick = () => {
+      if (torn) return;
+      const ahead = Math.min(ctx.currentTime + 0.4, stopAt);   // schedule copies ~0.4s ahead
+      while (nextStart < ahead) { scheduleCopy(nextStart); nextStart += period; }
+    };
+    tick();
+    const timer = setInterval(tick, 150);
+    const teardown = () => {
+      if (torn) return; torn = true;
+      clearInterval(timer);
+      for (const src of active) { try { src.stop(ctx.currentTime); } catch (_) {} }
+    };
+    return {
+      stop(when) {
+        const at = (typeof when === "number" && when > ctx.currentTime) ? when : ctx.currentTime;
+        stopAt = Math.min(stopAt, at);
+        tick();   // keep crossfading until stopAt so a region fade-out stays seamless
+        setTimeout(teardown, Math.max(0, (stopAt - ctx.currentTime) * 1000) + 80);
+      },
+    };
+  }
+
   const engine = {
     listener: null,
+    dialogueQueue: [],       // shape ids waiting to play, in entry order
+    dialoguePlaying: null,   // shape id of the dialogue sounding right now (only one at a time)
+    outroActive: false,      // the exit sequence is running — freeze location-driven playback
+    _introVoice: null,
+    _exitVoice: null,
 
     async setListener(latlng) {
       this.listener = latlng;
+      if (this.outroActive) return;   // during the outro, location changes are frozen
       const ctx = audioCtx();
       const insideIds = new Set();
       for (const s of state.shapes) if (contains(s, latlng)) insideIds.add(s.id);
@@ -751,7 +886,7 @@
         .map((s) => bufferFor(s.audioFile).catch(() => null)));
 
       for (const s of state.shapes) {
-        if (!s._rt) s._rt = { inside: false, armed: true, source: null, gain: null };
+        if (!s._rt) s._rt = { inside: false, armed: true, source: null, gain: null, dstate: "unplayed" };
         const rt = s._rt;
         const nowIn = insideIds.has(s.id);
         const rising = nowIn && !rt.inside;
@@ -771,13 +906,15 @@
             rt.gain.gain.setValueAtTime(rt.gain.gain.value, t);
             rt.gain.gain.linearRampToValueAtTime(target, t + dur);
           }
-        } else { // oneshot & dialogue
-          if (rising && rt.armed) {
-            this._playOnce(s);
-            rt.armed = false;
-            if (s.mode === "dialogue") this._duckOtherDialogues(s);
-          }
+        } else if (s.mode === "oneshot") {
+          if (rising && rt.armed) { this._playOnce(s); rt.armed = false; }
           if (!nowIn) rt.armed = true;
+        } else { // dialogue: play once ever; queue behind any dialogue already playing
+          if (rising && rt.dstate === "unplayed") {
+            rt.dstate = "queued";
+            this.dialogueQueue.push(s.id);
+            this._advanceDialogue();
+          }
         }
         rt.inside = nowIn;
       }
@@ -797,15 +934,20 @@
       if (!s.audioFile) return;
       const buf = decoded.get(s.audioFile); if (!buf) return;
       const ctx = audioCtx();
-      const src = ctx.createBufferSource();
-      src.buffer = buf; src.loop = true;
-      const g = ctx.createGain();
+      const g = ctx.createGain();   // region gain: enter/exit fades + proximity falloff
       const t = ctx.currentTime;
       g.gain.setValueAtTime(0.0001, t);
       g.gain.linearRampToValueAtTime(Math.max(0.0001, this._targetGain(s, latlng)), t + Math.max(0.01, s.fadeIn));
-      src.connect(g).connect(ctx.destination);
-      src.start();
-      s._rt.source = src; s._rt.gain = g;
+      g.connect(ctx.destination);
+      s._rt.gain = g;
+      if (s.loopMode === "crossfade") {
+        s._rt.source = makeCrossfadeLoop(buf, s.crossfade, g);
+      } else {
+        const src = ctx.createBufferSource();
+        src.buffer = buf; src.loop = true;
+        src.connect(g); src.start();
+        s._rt.source = src;
+      }
     },
 
     // Start every synced loop together, sample-aligned, muted — call on entering listen mode.
@@ -816,7 +958,7 @@
       const ctx = audioCtx();
       const startAt = ctx.currentTime + 0.12;   // one shared start time → all begin on the same sample
       for (const s of synced) {
-        if (!s._rt) s._rt = { inside: false, armed: true, source: null, gain: null };
+        if (!s._rt) s._rt = { inside: false, armed: true, source: null, gain: null, dstate: "unplayed" };
         if (s._rt.source) continue;
         const buf = decoded.get(s.audioFile); if (!buf) continue;
         const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
@@ -864,17 +1006,94 @@
       s._rt.source = src; s._rt.gain = g;
     },
 
-    _duckOtherDialogues(current) {
-      const ctx = audioCtx(); const t = ctx.currentTime;
+    // Play the next queued dialogue if none is currently sounding. One-at-a-time; FIFO.
+    async _advanceDialogue() {
+      if (this.dialoguePlaying) return;
+      const nextId = this.dialogueQueue.shift();
+      if (nextId === undefined) return;
+      const s = shapeById(nextId);
+      if (!s) return this._advanceDialogue();
+      this.dialoguePlaying = s.id;
+      s._rt.dstate = "playing";
+      reflectSounding();
+      const buf = s.audioFile ? await bufferFor(s.audioFile).catch(() => null) : null;
+      // Guard against a mode switch / stopAll that happened while the buffer decoded.
+      if (this.dialoguePlaying !== s.id) return;
+      if (!buf) return this._onDialogueFinished(s);
+      const ctx = audioCtx();
+      const src = ctx.createBufferSource(); src.buffer = buf; src.loop = false;
+      const g = ctx.createGain(); g.gain.setValueAtTime(s.gain, ctx.currentTime);
+      src.connect(g).connect(ctx.destination);
+      src.onended = () => {
+        if (s._rt && s._rt.source === src) { s._rt.source = null; s._rt.gain = null; this._onDialogueFinished(s); }
+      };
+      src.start();
+      s._rt.source = src; s._rt.gain = g;
+      reflectSounding();
+    },
+
+    _onDialogueFinished(s) {
+      if (this.dialoguePlaying === s.id) this.dialoguePlaying = null;
+      if (s._rt) { s._rt.source = null; s._rt.gain = null; s._rt.dstate = "finished"; }
+      reflectSounding();
+      this._advanceDialogue();
+    },
+
+    resetDialogue() {
+      this.dialogueQueue = [];
+      this.dialoguePlaying = null;
+    },
+
+    // ---- intro / exit (walk-level) clips ----
+    _sleep(ms) { return new Promise((r) => setTimeout(r, ms)); },
+    _playClipOnce(buf, gain, onended) {
+      const ctx = audioCtx();
+      const src = ctx.createBufferSource(); src.buffer = buf;
+      const g = ctx.createGain(); g.gain.setValueAtTime(gain, ctx.currentTime);
+      src.connect(g).connect(ctx.destination);
+      if (onended) src.onended = onended;
+      src.start();
+      return { src, g };
+    },
+    async playIntro() {
+      if (!state.introAudio) return;
+      const buf = await bufferFor(state.introAudio).catch(() => null);
+      if (!buf) return;
+      if (this._introVoice) { try { this._introVoice.src.stop(); } catch (_) {} }
+      this._introVoice = this._playClipOnce(buf, state.introGain, () => { this._introVoice = null; });
+    },
+    // Fade + stop every sounding voice matching `pick`, over `dur` seconds.
+    _fadeVoices(dur, pick) {
+      const ctx = audioCtx(), t = ctx.currentTime;
       for (const s of state.shapes) {
-        if (s.mode !== "dialogue" || s.id === current.id) continue;
-        const rt = s._rt; if (!rt || !rt.source) continue;
-        rt.gain.gain.cancelScheduledValues(t);
-        rt.gain.gain.setValueAtTime(rt.gain.gain.value, t);
-        rt.gain.gain.linearRampToValueAtTime(0.0001, t + 0.6);
-        try { rt.source.stop(t + 0.65); } catch (_) {}
-        rt.source = null; rt.gain = null;
+        if (!(s._rt && s._rt.source) || !pick(s)) continue;
+        const g = s._rt.gain;
+        g.gain.cancelScheduledValues(t); g.gain.setValueAtTime(g.gain.value, t);
+        g.gain.linearRampToValueAtTime(0.0001, t + dur);
+        try { s._rt.source.stop(t + dur + 0.05); } catch (_) {}
+        s._rt.source = null; s._rt.gain = null;
       }
+    },
+    // The end-of-walk experience: fade any dialogue (1s) → exit clip → fade everything (5s) → done.
+    async doOutro(onDone) {
+      if (this.outroActive) return;
+      this.outroActive = true;
+      this._fadeVoices(1.0, (s) => s.mode === "dialogue");
+      this.resetDialogue();
+      for (const s of state.shapes) if (s.mode === "dialogue" && s._rt) s._rt.dstate = "finished";
+      reflectSounding();
+      await this._sleep(1000);
+      if (!this.outroActive) return;
+      const buf = state.exitAudio ? await bufferFor(state.exitAudio).catch(() => null) : null;
+      if (buf) {
+        await new Promise((resolve) => { this._exitVoice = this._playClipOnce(buf, state.exitGain, () => { this._exitVoice = null; resolve(); }); });
+      }
+      if (!this.outroActive) return;
+      this._fadeVoices(5.0, () => true);   // everything else fades out
+      await this._sleep(5000);
+      if (!this.outroActive) return;
+      this.outroActive = false;
+      if (onDone) onDone();
     },
 
     stopShape(s) {
@@ -884,7 +1103,11 @@
     },
 
     stopAll() {
-      for (const s of state.shapes) { this.stopShape(s); if (s._rt) { s._rt.inside = false; s._rt.armed = true; } }
+      this.outroActive = false;
+      if (this._introVoice) { try { this._introVoice.src.stop(); } catch (_) {} this._introVoice = null; }
+      if (this._exitVoice) { try { this._exitVoice.src.stop(); } catch (_) {} this._exitVoice = null; }
+      this.resetDialogue();
+      for (const s of state.shapes) { this.stopShape(s); if (s._rt) { s._rt.inside = false; s._rt.armed = true; s._rt.dstate = "unplayed"; } }
       reflectSounding();
     },
   };
@@ -947,8 +1170,18 @@
       const sounding = !!(s._rt && s._rt.source) && (!g || g.gain.value > 0.005); // silent synced loops aren't "sounding"
       const card = document.querySelector(`.card[data-id="${s.id}"]`);
       if (card) card.classList.toggle("sounding", sounding);
-      const weight = state.selectedIds.has(s.id) ? 4 : (sounding ? 3 : 2);
-      if (s.layer) s.layer.setStyle({ fillOpacity: sounding ? 0.5 : 0.25, weight });
+      if (!s.layer) continue;
+      const sel = state.selectedIds.has(s.id);
+      if (s.mode === "dialogue") {
+        // Color by playback state; the currently-playing one also reads as sounding.
+        const st = dialogueState(s);
+        const col = dColor(st);
+        s.layer.setStyle({ color: col, fillColor: col, fillOpacity: DIALOGUE_STATE_OPACITY[st],
+                           weight: sel ? 4 : (st === "playing" ? 3 : 2) });
+      } else {
+        const weight = sel ? 4 : (sounding ? 3 : 2);
+        s.layer.setStyle({ fillOpacity: sounding ? 0.5 : 0.25, weight });
+      }
     }
   }
 
@@ -990,14 +1223,18 @@
       if (listenerMarker) { map.removeLayer(listenerMarker); listenerMarker = null; }
       $("listenerReadout").textContent = "No listener placed";
       setTool("select");
+      reflectSounding();           // reset dialogue shapes back to their "unplayed" color
     } else {
       cancelDraw();
       clearEditHandles();
       mapEl.style.cursor = "crosshair";
       audioCtx(); // unlock on user gesture
-      for (const s of state.shapes) s._rt = { inside: false, armed: true, source: null, gain: null };
+      engine.resetDialogue();
+      for (const s of state.shapes) s._rt = { inside: false, armed: true, source: null, gain: null, dstate: "unplayed" };
       engine.startSyncedLoops();   // synced loops run from the moment you enter listen mode
+      reflectSounding();
     }
+    updateListenActions();
   }
 
   // ============================================================== ZIP I/O ===
@@ -1009,8 +1246,13 @@
       creator: state.creator || "",
       about: state.about || "",
       albumArt: state.albumArt ? state.albumArt.name : null,
+      intro: state.introAudio || null,
+      introGain: state.introGain,
+      exit: state.exitAudio || null,
+      exitGain: state.exitGain,
       center: [map.getCenter().lat, map.getCenter().lng],
       zoom: map.getZoom(),
+      dialogueColors: { ...state.dialogueColors },
       shapes: state.shapes.map(serializeShape),
     };
   }
@@ -1019,6 +1261,8 @@
   async function buildBundleZip(onProgress) {
     const zip = new JSZip();
     const usedAudio = new Set(state.shapes.map((s) => s.audioFile).filter(Boolean));
+    if (state.introAudio) usedAudio.add(state.introAudio);
+    if (state.exitAudio) usedAudio.add(state.exitAudio);
     const bundle = bundleMeta();
     zip.file("map.json", JSON.stringify(bundle, null, 2));
     const audioDir = zip.folder("audio");
@@ -1057,7 +1301,9 @@
   function serializeShape(s) {
     const base = { id: s.id, name: s.name, type: s.type, color: s.color,
                    audioFile: s.audioFile, mode: s.mode, gain: s.gain,
-                   fadeIn: s.fadeIn, fadeOut: s.fadeOut, falloff: s.falloff || "none" };
+                   fadeIn: s.fadeIn, fadeOut: s.fadeOut,
+                   loopMode: s.loopMode || "simple", crossfade: s.crossfade ?? 1.0,
+                   falloff: s.falloff || "none" };
     if (s.type === "circle") return { ...base, center: s.center, radius: s.radius };
     return { ...base, points: s.points };
   }
@@ -1100,6 +1346,11 @@
       state.name = bundle.name || "";
       state.creator = bundle.creator || "";
       state.about = bundle.about || "";
+      state.introAudio = (bundle.intro && audioStore.has(bundle.intro)) ? bundle.intro : null;
+      state.introGain = bundle.introGain ?? 1.0;
+      state.exitAudio = (bundle.exit && audioStore.has(bundle.exit)) ? bundle.exit : null;
+      state.exitGain = bundle.exitGain ?? 1.0;
+      state.dialogueColors = { ...DEFAULT_DIALOGUE_COLORS, ...(bundle.dialogueColors || {}) };
       syncDetailsInputs();
       if (Array.isArray(bundle.center)) map.setView(bundle.center, bundle.zoom || 15);
 
@@ -1113,6 +1364,7 @@
           type: raw.type, color: raw.color || SHAPE_COLORS[raw.type] || "#4363d8",
           audioFile: raw.audioFile || null, mode: raw.mode || "loop",
           gain: raw.gain ?? 1, fadeIn: raw.fadeIn ?? 2, fadeOut: raw.fadeOut ?? 3,
+          loopMode: raw.loopMode || "simple", crossfade: raw.crossfade ?? 1.0,
           falloff: raw.falloff || "none",
           layer: null, _rt: null, ...geom,
         };
@@ -1149,6 +1401,32 @@
     }
   }
 
+  // ---- intro / exit clips (walk-level dialogue) ------------------------
+  // Both are stored in audioStore by filename (shared with shape audio) and bundled under audio/.
+  const WALK_CLIPS = [["introAudio", "intro"], ["exitAudio", "exit"]];
+  function setWalkClip(stateKey, file) {
+    if (!audioStore.has(file.name)) audioStore.set(file.name, { blob: file, url: URL.createObjectURL(file) });
+    state[stateKey] = file.name;
+    updateWalkClipUI();
+  }
+  function updateWalkClipUI() {
+    for (const [stateKey, id] of WALK_CLIPS) {
+      const name = state[stateKey], has = !!name;
+      $(id + "Choose").hidden = has;
+      $(id + "Name").hidden = !has;
+      $(id + "GainRow").hidden = !has;
+      $(id + "Play").hidden = !has;
+      $(id + "Dl").hidden = !has;
+      $(id + "Clear").hidden = !has;
+      if (has) { $(id + "Name").textContent = name; $(id + "Gain").value = state[id + "Gain"]; }
+    }
+    updateListenActions();
+  }
+  function updateListenActions() {
+    if ($("doIntro")) $("doIntro").disabled = !state.introAudio;
+    if ($("doOutro")) $("doOutro").disabled = state.mode !== "listen";
+  }
+
   // =============================================================== HELPERS ===
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -1182,6 +1460,11 @@
     return JSON.stringify({
       name: state.name, creator: state.creator, about: state.about,
       albumArt: state.albumArt ? state.albumArt.name : null,
+      intro: state.introAudio || null,
+      introGain: state.introGain,
+      exit: state.exitAudio || null,
+      exitGain: state.exitGain,
+      dialogueColors: { ...state.dialogueColors },
       selected: [...state.selectedIds],
       shapes: state.shapes.map(serializeShape),
     });
@@ -1195,6 +1478,7 @@
       const s = { id: raw.id, name: raw.name, type: raw.type, color: raw.color,
                   audioFile: raw.audioFile || null, mode: raw.mode || "loop",
                   gain: raw.gain ?? 1, fadeIn: raw.fadeIn ?? 2, fadeOut: raw.fadeOut ?? 3,
+                  loopMode: raw.loopMode || "simple", crossfade: raw.crossfade ?? 1.0,
                   falloff: raw.falloff || "none", layer: null, _rt: null, ...geom };
       buildLayer(s);
       state.shapes.push(s);
@@ -1202,6 +1486,11 @@
     state.name = snap.name || "";
     state.creator = snap.creator || "";
     state.about = snap.about || "";
+    state.introAudio = (snap.intro && audioStore.has(snap.intro)) ? snap.intro : null;
+    state.introGain = snap.introGain ?? 1.0;
+    state.exitAudio = (snap.exit && audioStore.has(snap.exit)) ? snap.exit : null;
+    state.exitGain = snap.exitGain ?? 1.0;
+    state.dialogueColors = { ...DEFAULT_DIALOGUE_COLORS, ...(snap.dialogueColors || {}) };
     syncDetailsInputs();
     state.albumArt = (snap.albumArt && artStore.has(snap.albumArt))
       ? { name: snap.albumArt, blob: artStore.get(snap.albumArt).blob, url: artStore.get(snap.albumArt).url }
@@ -1251,6 +1540,11 @@
     $("mapCreator").value = state.creator || "";
     $("mapAbout").value = state.about || "";
     $("aboutCount").textContent = (state.about || "").length + " / 2000";
+    $("dcUnplayed").value = dColor("unplayed");
+    $("dcQueued").value = dColor("queued");
+    $("dcPlaying").value = dColor("playing");
+    $("dcFinished").value = dColor("finished");
+    updateWalkClipUI();
   }
 
   // ================================================================ WIRING ===
@@ -1293,6 +1587,39 @@
   $("mapCreator").onchange = () => commit();
   $("mapAbout").oninput = (e) => { state.about = e.target.value; $("aboutCount").textContent = state.about.length + " / 2000"; };
   $("mapAbout").onchange = () => commit();
+  // Per-walk dialogue state colors (Details tab). Recolor the map live; commit on release.
+  for (const [key, id] of Object.entries({ unplayed: "dcUnplayed", queued: "dcQueued", playing: "dcPlaying", finished: "dcFinished" })) {
+    $(id).oninput = (e) => {
+      state.dialogueColors[key] = e.target.value;
+      reflectSounding();     // recolor dialogue layers live (unplayed swatch also refreshes on renderSide)
+    };
+    $(id).onchange = () => { renderSide(); commit(); };
+  }
+  // Intro / exit clip pickers (Details tab)
+  for (const [stateKey, id] of WALK_CLIPS) {
+    $(id + "Choose").onclick = () => $(id + "Input").click();
+    $(id + "Input").onchange = (e) => { if (e.target.files[0]) { setWalkClip(stateKey, e.target.files[0]); commit(); } e.target.value = ""; };
+    $(id + "Play").onclick = () => { if (state[stateKey]) previewAudio(state[stateKey], $(id + "Play")); };
+    $(id + "Dl").onclick = () => { if (state[stateKey]) downloadAudio(state[stateKey]); };
+    $(id + "Gain").oninput = () => { state[id + "Gain"] = clamp(parseFloat($(id + "Gain").value) || 0, 0, 1); };
+    $(id + "Gain").onchange = () => commit();
+    $(id + "Clear").onclick = () => { state[stateKey] = null; updateWalkClipUI(); commit(); };
+  }
+  // Listen-tab intro / outro triggers
+  $("doIntro").onclick = () => engine.playIntro();
+  $("doOutro").onclick = () => {
+    $("doOutro").disabled = true;
+    engine.doOutro(() => {
+      // Editor preview: after the outro, return to normal playback at the current spot.
+      for (const s of state.shapes) { engine.stopShape(s); s._rt = { inside: false, armed: true, source: null, gain: null, dstate: "unplayed" }; }
+      engine.resetDialogue();
+      engine.startSyncedLoops();
+      if (engine.listener) engine.setListener(engine.listener);
+      reflectSounding();
+      updateListenActions();
+      toast("Outro finished — back to normal playback.", "ok");
+    });
+  };
   $("tabBtnAreas").onclick = () => switchTab("areas");
   $("tabBtnDetails").onclick = () => switchTab("details");
   $("albumArtInput").onchange = (e) => { if (e.target.files[0]) { setAlbumArt(e.target.files[0]); commit(); } };
@@ -1306,6 +1633,7 @@
   $("mExport").onclick = () => { closeMenu(); exportZip(); };
   $("mWalks").onclick = () => { closeMenu(); openWalksModal(); };
   $("mPublish").onclick = () => { closeMenu(); openPublishModal(); };
+  $("mLogout").onclick = () => logout();
   $("importInput").onchange = (e) => { if (e.target.files[0]) importZip(e.target.files[0]); e.target.value = ""; };
 
   // Warn before leaving/closing the tab if there are edits that haven't been exported.
@@ -1331,18 +1659,65 @@
   const publishReady = CFG.publishApiUrl && !/REPLACE/.test(CFG.publishApiUrl);
   let idToken = null, userEmail = null;
 
+  // ---- persisted sign-in: keep the Google token across refreshes so login isn't needed each time.
+  const AUTH_KEY = "songitude.auth";
+  function jwtExp(token) { try { return JSON.parse(atob(token.split(".")[1])).exp || 0; } catch (_) { return 0; } }
+  function saveAuth() {
+    try { localStorage.setItem(AUTH_KEY, JSON.stringify({ token: idToken, email: userEmail, exp: jwtExp(idToken) })); } catch (_) {}
+  }
+  function loadAuth() {
+    try {
+      const a = JSON.parse(localStorage.getItem(AUTH_KEY) || "null");
+      if (a && a.token && a.exp * 1000 > Date.now() + 60000) return a;   // still valid (>1 min left)
+    } catch (_) {}
+    return null;
+  }
+  function clearAuth() { try { localStorage.removeItem(AUTH_KEY); } catch (_) {} }
+
+  function applySignedIn(email) {
+    $("loginGate").hidden = true;
+    $("gateError").hidden = true;
+    $("accountEmail").textContent = email || "signed in";
+    $("accountEmail").hidden = false;
+    $("mPublish").hidden = !publishReady;
+    $("mWalks").hidden = !publishReady;
+    $("mLogout").hidden = false;
+  }
+  function applySignedOut() {
+    idToken = null; userEmail = null;
+    $("accountEmail").hidden = true;
+    $("mPublish").hidden = true; $("mWalks").hidden = true; $("mLogout").hidden = true;
+    $("loginGate").hidden = false;
+  }
+  function verifyToken() {
+    return fetch(CFG.publishApiUrl, {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + idToken, "Content-Type": "application/json" },
+      body: JSON.stringify({ check: true }),
+    }).then((r) => (r.ok ? r.json() : null));
+  }
+
   function initAuth() {
     if (!authReady) {
       // Not configured yet → editor stays open, publishing hidden.
       $("loginGate").hidden = true;
       return;
     }
-    $("loginGate").hidden = false;      // gate the editor until signed in
+    const stored = loadAuth();
+    if (stored) {
+      // Reuse the saved token so a refresh doesn't require signing in again.
+      idToken = stored.token; userEmail = stored.email;
+      applySignedIn(userEmail);
+      // Re-verify in the background; if it's been revoked/de-listed, fall back to the gate.
+      if (publishReady) verifyToken().then((d) => { if (!d || !d.authorized) { clearAuth(); applySignedOut(); } }).catch(() => {});
+    } else {
+      $("loginGate").hidden = false;   // gate the editor until signed in
+    }
     const boot = () => {
       if (!(window.google && google.accounts && google.accounts.id)) { setTimeout(boot, 150); return; }
       google.accounts.id.initialize({ client_id: CFG.googleClientId, callback: onCredential, auto_select: true });
       google.accounts.id.renderButton($("gbtn"), { theme: "outline", size: "large", text: "signin_with", shape: "pill" });
-      google.accounts.id.prompt();   // auto-sign-in returning users (remembers login across refreshes)
+      if (!idToken) google.accounts.id.prompt();   // silent auto-sign-in only when not already restored
     };
     boot();
   }
@@ -1352,25 +1727,25 @@
     if (publishReady) {
       // Verify against the allowlist server-side before unlocking the editor.
       try {
-        const r = await fetch(CFG.publishApiUrl, {
-          method: "POST",
-          headers: { "Authorization": "Bearer " + idToken, "Content-Type": "application/json" },
-          body: JSON.stringify({ check: true }),
-        });
-        const data = r.ok ? await r.json() : null;
+        const data = await verifyToken();
         if (!data || !data.authorized) { rejectAccess(); return; }
       } catch (_) { rejectAccess(); return; }
     }
-    $("loginGate").hidden = true;
-    $("gateError").hidden = true;
-    $("accountEmail").textContent = userEmail || "signed in";
-    $("accountEmail").hidden = false;
-    $("mPublish").hidden = !publishReady;
-    $("mWalks").hidden = !publishReady;
+    saveAuth();                 // remember across refreshes
+    applySignedIn(userEmail);
+  }
+
+  function logout() {
+    closeMenu();
+    clearAuth();
+    try { google.accounts.id.disableAutoSelect(); } catch (_) {}
+    applySignedOut();
+    try { google.accounts.id.prompt(); } catch (_) {}
   }
 
   function rejectAccess() {
     idToken = null;
+    clearAuth();
     try { google.accounts.id.disableAutoSelect(); } catch (_) {}
     const el = $("gateError");
     el.innerHTML = `<b>${userEmail || "This account"}</b> isn't approved yet.<br>` +
@@ -1387,9 +1762,10 @@
   }
   function walkTotalSize() {
     let total = 0;
-    for (const n of new Set(state.shapes.map((s) => s.audioFile).filter(Boolean))) {
-      const r = audioStore.get(n); if (r) total += r.blob.size;
-    }
+    const audio = new Set(state.shapes.map((s) => s.audioFile).filter(Boolean));
+    if (state.introAudio) audio.add(state.introAudio);
+    if (state.exitAudio) audio.add(state.exitAudio);
+    for (const n of audio) { const r = audioStore.get(n); if (r) total += r.blob.size; }
     if (state.albumArt) total += state.albumArt.blob.size;
     return total;
   }
@@ -1484,16 +1860,34 @@
   }
 
   let lastQrDataUrl = null, lastQrName = "soundwalk";
+  // Render a QR code to a PNG data URL via qrcode-generator (pure client-side, no CDN build quirks).
+  function qrPngDataUrl(text, px) {
+    const qr = qrcode(0, "M");          // typeNumber 0 = auto-size, error correction "M"
+    qr.addData(text);
+    qr.make();
+    const count = qr.getModuleCount(), margin = 4, total = count + margin * 2;
+    const cell = Math.max(2, Math.floor(px / total)), size = cell * total;
+    const cv = document.createElement("canvas");
+    cv.width = cv.height = size;
+    const cx = cv.getContext("2d");
+    cx.fillStyle = "#fff"; cx.fillRect(0, 0, size, size);
+    cx.fillStyle = "#000";
+    for (let r = 0; r < count; r++)
+      for (let c = 0; c < count; c++)
+        if (qr.isDark(r, c)) cx.fillRect((c + margin) * cell, (r + margin) * cell, cell, cell);
+    return cv.toDataURL("image/png");
+  }
   function showSuccess(name, walkId) {
     const url = "https://songitude.com/w.html?walk=" + encodeURIComponent(walkId);
     $("successMsg").innerHTML = `<b>${name}</b> is now available in the app.`;
     $("successLink").textContent = url; $("successLink").href = url;
     lastQrName = (name || "soundwalk").replace(/[^\w.-]+/g, "_");
     lastQrDataUrl = null;
-    if (window.QRCode) {
-      QRCode.toDataURL(url, { width: 320, margin: 2 }, (err, dataUrl) => {
-        if (!err) { lastQrDataUrl = dataUrl; $("successQr").src = dataUrl; }
-      });
+    if (window.qrcode) {
+      try {
+        lastQrDataUrl = qrPngDataUrl(url, 320);
+        $("successQr").src = lastQrDataUrl;
+      } catch (e) { console.error("QR generation failed", e); }
     }
     $("successModal").hidden = false;
   }
@@ -1528,7 +1922,7 @@
         `${w.creator ? w.creator + " · " : ""}${w.shapeCount || 0} areas · ${w.sizeBytes ? fmtBytes(w.sizeBytes) : ""} · ${(w.updatedAt || "").slice(0, 10)}`;
       const actions = el("div", "actions");
       const dl = el("button", null, "⇩ Download"); dl.onclick = () => downloadWalkZip(w);
-      const load = el("button", null, "✎ Load into editor"); load.onclick = () => loadWalkIntoEditor(w);
+      const load = el("button", null, "✎ Load into editor"); load.onclick = () => loadWalkIntoEditor(w, load);
       const del = el("button", "danger", "🗑 Delete"); del.onclick = () => deleteWalkFromServer(w, del);
       actions.append(dl, load, del);
       item.append(info, actions);
@@ -1542,8 +1936,10 @@
       downloadBlob(await r.blob(), (w.name || "soundwalk").replace(/[^\w.-]+/g, "_") + ".zip");
     } catch (e) { toast("Download failed: " + e.message, "err"); }
   }
-  async function loadWalkIntoEditor(w) {
+  async function loadWalkIntoEditor(w, btn) {
     if (dirty && !confirm("Loading this walk will replace your current editor document. Continue?")) return;
+    const orig = btn && btn.innerHTML;
+    if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Loading…`; }
     try {
       const r = await fetch(w.zipUrl, { cache: "no-store" });
       if (!r.ok) throw new Error("HTTP " + r.status);
@@ -1551,7 +1947,11 @@
       state.walkId = w.id;   // now editing an owned published walk → publish offers "Update existing"
       $("walksModal").hidden = true;
       toast(`Loaded “${w.name}”. Edit, then Publish → Update existing walk.`, "ok");
-    } catch (e) { toast("Load failed: " + e.message, "err"); }
+    } catch (e) {
+      toast("Load failed: " + e.message, "err");
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    }
   }
   async function deleteWalkFromServer(w, btn) {
     if (!confirm(`Delete “${w.name}” from the app for everyone? This can’t be undone.`)) return;

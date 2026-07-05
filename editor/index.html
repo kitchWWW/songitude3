@@ -30,6 +30,7 @@
           <button id="mExport">⇩ Export .zip</button>
           <button id="mWalks" hidden>🗂 My walks</button>
           <button id="mPublish" class="menu-publish" hidden>☁ Publish to app</button>
+          <button id="mLogout" hidden>⎋ Log out</button>
         </div>
       </div>
     </div>
@@ -52,6 +53,8 @@
           <option value="driving">🚗 Drive</option>
           <option value="teleport">⚡ Teleport</option>
         </select>
+        <button id="doIntro" class="listen-action" title="Play the intro dialogue">▶ Do intro</button>
+        <button id="doOutro" class="listen-action" title="Preview the end-of-walk exit sequence">⏏ Do outro</button>
         <span class="listener-readout" id="listenerReadout">No listener placed</span>
       </div>
       <div id="map"></div>
@@ -99,6 +102,42 @@
               <span id="albumArtLabel">＋ Choose image</span>
               <input id="albumArtInput" type="file" accept="image/*" hidden />
             </label>
+          </div>
+          <div class="field">
+            <span class="field-label">Intro dialogue <span class="field-hint">— plays once when a walk begins</span></span>
+            <div class="clip-pick" id="introPick">
+              <button class="clip-choose" id="introChoose">＋ Choose audio</button>
+              <span class="clip-name" id="introName" hidden></span>
+              <label class="clip-gain" id="introGainRow" hidden>Gain
+                <input type="number" id="introGain" min="0" max="1" step="0.05" /></label>
+              <button class="clip-play" id="introPlay" title="Preview" hidden>▶</button>
+              <button class="clip-dl" id="introDl" title="Download" hidden>⬇</button>
+              <button class="clip-clear" id="introClear" title="Remove" hidden>✕</button>
+              <input id="introInput" type="file" accept="audio/*" hidden />
+            </div>
+          </div>
+          <div class="field">
+            <span class="field-label">Exit dialogue <span class="field-hint">— plays when the listener ends the session</span></span>
+            <div class="clip-pick" id="exitPick">
+              <button class="clip-choose" id="exitChoose">＋ Choose audio</button>
+              <span class="clip-name" id="exitName" hidden></span>
+              <label class="clip-gain" id="exitGainRow" hidden>Gain
+                <input type="number" id="exitGain" min="0" max="1" step="0.05" /></label>
+              <button class="clip-play" id="exitPlay" title="Preview" hidden>▶</button>
+              <button class="clip-dl" id="exitDl" title="Download" hidden>⬇</button>
+              <button class="clip-clear" id="exitClear" title="Remove" hidden>✕</button>
+              <input id="exitInput" type="file" accept="audio/*" hidden />
+            </div>
+          </div>
+          <div class="field">
+            <span class="field-label">Dialogue colors
+              <span class="field-hint">— how dialogue areas are shaded by playback state</span></span>
+            <div class="dialogue-colors">
+              <label class="dcolor"><input type="color" id="dcUnplayed" /><span>Unplayed</span></label>
+              <label class="dcolor"><input type="color" id="dcQueued" /><span>Queued</span></label>
+              <label class="dcolor"><input type="color" id="dcPlaying" /><span>Playing</span></label>
+              <label class="dcolor"><input type="color" id="dcFinished" /><span>Played</span></label>
+            </div>
           </div>
         </div>
       </div>
@@ -182,7 +221,7 @@
 
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="config.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"
