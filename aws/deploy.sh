@@ -60,7 +60,15 @@ echo "    role propagation…"; sleep 12
 
 deploy_fn () {  # name dir handlerEnv timeout
   local name="$1" dir="$2" env="$3" timeout="$4"
-  ( cd "$HERE/$dir" && zip -qr /tmp/$name.zip index.mjs )
+  rm -f "/tmp/$name.zip"
+  ( cd "$HERE/$dir"
+    if [ -f package.json ]; then
+      # The Node runtime ships only the AWS SDK; bundle any third-party deps (e.g. adm-zip).
+      npm install --omit=dev --no-audit --no-fund --silent
+      zip -qr "/tmp/$name.zip" index.mjs node_modules package.json
+    else
+      zip -qr "/tmp/$name.zip" index.mjs
+    fi )
   if aws lambda get-function --function-name "$name" >/dev/null 2>&1; then
     aws lambda update-function-code --function-name "$name" --zip-file "fileb:///tmp/$name.zip" >/dev/null
     aws lambda wait function-updated --function-name "$name"
