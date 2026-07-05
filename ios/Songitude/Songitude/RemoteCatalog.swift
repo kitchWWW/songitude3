@@ -105,6 +105,8 @@ enum WalkDownloader {
 
                 var rels = Set(map.shapes.compactMap { $0.audioFile }.map { "audio/\($0)" })
                 if let art = map.albumArt, !art.isEmpty { rels.insert(art) }
+                if let intro = map.intro, !intro.isEmpty { rels.insert("audio/\(intro)") }
+                if let exit = map.exit, !exit.isEmpty { rels.insert("audio/\(exit)") }
                 let list = Array(rels)
                 for (i, rel) in list.enumerated() {
                     let dest = dir.appendingPathComponent(rel)

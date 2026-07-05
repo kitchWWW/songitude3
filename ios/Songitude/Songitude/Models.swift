@@ -7,9 +7,57 @@ import SwiftUI
 enum PlaybackMode: String, Codable {
     case loop        // loops while inside; fades in/out
     case oneshot     // plays once to completion on entry; no fades
-    case dialogue    // like oneshot, but ducks out when another dialogue starts
+    case dialogue    // plays once ever; if another dialogue is sounding it queues and plays after
     case syncedLoop  // starts with playback and loops forever in sample-lock with all other
                      // synced loops; location only gates its volume (silent, still running, when outside)
+}
+
+/// The playback state of a dialogue area, reflected by its color on the map (in the app and editor).
+enum DialogueState: String {
+    case unplayed    // not yet entered
+    case queued      // entered while another dialogue is playing; waiting its turn
+    case playing     // sounding right now
+    case finished    // has played (won't play again this session)
+
+    /// Fill opacity that gives each state its look (finished is faded + see-through).
+    var fillOpacity: CGFloat {
+        switch self {
+        case .unplayed: return 0.25
+        case .queued:   return 0.42
+        case .playing:  return 0.60
+        case .finished: return 0.08
+        }
+    }
+}
+
+/// Per-walk palette for the four dialogue states (authored in the editor, stored in map.json).
+struct DialogueColors: Codable {
+    var unplayed: String, queued: String, playing: String, finished: String
+
+    init(unplayed: String = "#8a63d2", queued: String = "#f5a623",
+         playing: String = "#2ecc71", finished: String = "#ffffff") {
+        self.unplayed = unplayed; self.queued = queued; self.playing = playing; self.finished = finished
+    }
+    // Tolerate a partial/absent object — fall back to defaults per key.
+    init(from decoder: Decoder) throws {
+        var d = DialogueColors()
+        if let c = try? decoder.container(keyedBy: CodingKeys.self) {
+            d.unplayed = (try? c.decode(String.self, forKey: .unplayed)) ?? d.unplayed
+            d.queued   = (try? c.decode(String.self, forKey: .queued))   ?? d.queued
+            d.playing  = (try? c.decode(String.self, forKey: .playing))  ?? d.playing
+            d.finished = (try? c.decode(String.self, forKey: .finished)) ?? d.finished
+        }
+        self = d
+    }
+
+    func hex(for state: DialogueState) -> String {
+        switch state {
+        case .unplayed: return unplayed
+        case .queued:   return queued
+        case .playing:  return playing
+        case .finished: return finished
+        }
+    }
 }
 
 enum ShapeType: String, Codable {
@@ -36,10 +84,12 @@ struct SoundShape: Codable, Identifiable {
     let gain: Double
     let fadeIn: Double
     let fadeOut: Double
+    let loopMode: String        // loop mode only: "simple" | "crossfade" (absent ⇒ "simple")
+    let crossfade: Double       // seconds; overlap for crossfade loops
     let falloff: Falloff        // circle loops: proximity gain toward the center
 
     enum CodingKeys: String, CodingKey {
-        case id, name, type, color, center, radius, points, audioFile, mode, gain, fadeIn, fadeOut, falloff
+        case id, name, type, color, center, radius, points, audioFile, mode, gain, fadeIn, fadeOut, loopMode, crossfade, falloff
     }
 
     init(from decoder: Decoder) throws {
@@ -56,6 +106,8 @@ struct SoundShape: Codable, Identifiable {
         gain = (try? c.decode(Double.self, forKey: .gain)) ?? 1.0
         fadeIn = (try? c.decode(Double.self, forKey: .fadeIn)) ?? 2.0
         fadeOut = (try? c.decode(Double.self, forKey: .fadeOut)) ?? 3.0
+        loopMode = (try? c.decode(String.self, forKey: .loopMode)) ?? "simple"
+        crossfade = (try? c.decode(Double.self, forKey: .crossfade)) ?? 1.0
         falloff = (try? c.decode(Falloff.self, forKey: .falloff)) ?? .none
     }
 }
@@ -89,6 +141,7 @@ extension SoundShape {
         (points ?? []).compactMap { $0.count == 2 ? CLLocationCoordinate2D(latitude: $0[0], longitude: $0[1]) : nil }
     }
     var swiftUIColor: Color { Color(hex: color) }
+    var isCrossfadeLoop: Bool { mode == .loop && loopMode == "crossfade" }
 }
 
 /// The full map definition (`map.json`).
@@ -96,14 +149,20 @@ struct SoundMap: Codable {
     let version: Int
     let name: String
     let albumArt: String?
+    let intro: String?          // audio/ filename played once at the start of a walk
+    let introGain: Double?      // 0..1 level for the intro clip (absent ⇒ 1.0)
+    let exit: String?           // audio/ filename played when the listener ends the session
+    let exitGain: Double?       // 0..1 level for the exit clip (absent ⇒ 1.0)
     let center: [Double]?
     let zoom: Double?
+    let dialogueColors: DialogueColors?
     let shapes: [SoundShape]
 
     var centerCoord: CLLocationCoordinate2D {
         if let c = center, c.count == 2 { return CLLocationCoordinate2D(latitude: c[0], longitude: c[1]) }
         return CLLocationCoordinate2D(latitude: 40.7128, longitude: -74.006)
     }
+    var dialoguePalette: DialogueColors { dialogueColors ?? DialogueColors() }
 }
 
 /// A loadable bundle on disk: a folder containing `map.json`, `audio/`, and optional album art.

@@ -40,7 +40,20 @@ struct ContentView: View {
 
             VStack {
                 Spacer()
-                playButton.padding(.bottom, 28)
+                HStack(spacing: 16) {
+                    playButton
+                    if app.engine.isRunning && app.engine.canEndSession {
+                        Button { app.engine.endSession() } label: {
+                            Text("All done?")
+                                .font(.headline).foregroundStyle(.primary)
+                                .padding(.horizontal, 20).padding(.vertical, 16)
+                                .background(.ultraThinMaterial, in: Capsule())
+                        }
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
+                }
+                .animation(.easeInOut, value: app.engine.canEndSession)
+                .padding(.bottom, 28)
             }
 
             if app.experiences.isEmpty && app.selectedExperience == nil { emptyOverlay }
@@ -62,6 +75,8 @@ struct ContentView: View {
             MapOverlayView(shapes: exp.map.shapes,
                            offset: app.offset,
                            soundingIDs: app.engine.soundingShapeIDs,
+                           dialogueStates: app.engine.dialogueStates,
+                           dialogueColors: exp.map.dialoguePalette,
                            centerOn: exp.map.centerCoord,
                            experienceID: exp.id)
         } else {

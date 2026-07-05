@@ -52,6 +52,7 @@ struct WalksBrowserView: View {
                 }
             }
             .navigationTitle("Sound walks")
+            .onAppear { app.catalog.resort(near: app.location.lastKnownLocation) }
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button { app.refreshCatalog() } label: { Image(systemName: "arrow.clockwise") }

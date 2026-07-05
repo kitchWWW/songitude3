@@ -7,6 +7,8 @@ struct MapOverlayView: UIViewRepresentable {
     let shapes: [SoundShape]
     let offset: CoordinateOffset
     let soundingIDs: Set<String>
+    let dialogueStates: [String: DialogueState]
+    let dialogueColors: DialogueColors
     let centerOn: CLLocationCoordinate2D
     let experienceID: String
 
@@ -32,6 +34,8 @@ struct MapOverlayView: UIViewRepresentable {
             map.setRegion(region, animated: true)
         }
         c.soundingIDs = soundingIDs
+        c.dialogueStates = dialogueStates
+        c.dialogueColors = dialogueColors
         c.applySounding()
     }
 
@@ -59,21 +63,35 @@ struct MapOverlayView: UIViewRepresentable {
     final class Coordinator: NSObject, MKMapViewDelegate {
         var signature = ""
         var soundingIDs: Set<String> = []
+        var dialogueStates: [String: DialogueState] = [:]
+        var dialogueColors = DialogueColors()
         var overlayToShape: [ObjectIdentifier: SoundShape] = [:]
         var renderers: [ObjectIdentifier: MKOverlayPathRenderer] = [:]
+
+        /// Stroke color, fill alpha, and line width for a shape given its current state. Dialogue
+        /// shapes are colored by playback state; everything else by its own color + sounding highlight.
+        private func style(for shape: SoundShape) -> (UIColor, CGFloat, CGFloat) {
+            if shape.mode == .dialogue {
+                let st = dialogueStates[shape.id] ?? .unplayed
+                return (UIColor(hexString: dialogueColors.hex(for: st)), st.fillOpacity, st == .playing ? 3 : 2)
+            }
+            let color = UIColor(hexString: shape.color)
+            let sounding = soundingIDs.contains(shape.id)
+            return (color, sounding ? 0.55 : 0.25, sounding ? 3 : 2)
+        }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             guard let shape = overlayToShape[ObjectIdentifier(overlay)] else {
                 return MKOverlayRenderer(overlay: overlay)
             }
-            let color = UIColor(hexString: shape.color)
             let r: MKOverlayPathRenderer
             if let circle = overlay as? MKCircle { r = MKCircleRenderer(circle: circle) }
             else if let poly = overlay as? MKPolygon { r = MKPolygonRenderer(polygon: poly) }
             else { return MKOverlayRenderer(overlay: overlay) }
+            let (color, alpha, width) = style(for: shape)
             r.strokeColor = color
-            r.lineWidth = 2
-            r.fillColor = color.withAlphaComponent(0.25)
+            r.lineWidth = width
+            r.fillColor = color.withAlphaComponent(alpha)
             renderers[ObjectIdentifier(overlay)] = r
             return r
         }
@@ -81,10 +99,10 @@ struct MapOverlayView: UIViewRepresentable {
         func applySounding() {
             for (oid, r) in renderers {
                 guard let shape = overlayToShape[oid] else { continue }
-                let sounding = soundingIDs.contains(shape.id)
-                let color = UIColor(hexString: shape.color)
-                r.fillColor = color.withAlphaComponent(sounding ? 0.55 : 0.25)
-                r.lineWidth = sounding ? 3 : 2
+                let (color, alpha, width) = style(for: shape)
+                r.strokeColor = color
+                r.fillColor = color.withAlphaComponent(alpha)
+                r.lineWidth = width
                 r.setNeedsDisplay()
             }
         }

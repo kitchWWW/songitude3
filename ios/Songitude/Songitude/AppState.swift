@@ -57,6 +57,10 @@ final class AppState: ObservableObject {
         // When the catalog arrives, honor any pending deep link.
         catalog.$walks.receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.processPendingWalk() }.store(in: &cancellables)
+        // Keep the catalog sorted nearest-first as fixes arrive (fixes only flow while playing,
+        // so the list is correctly ordered the next time the browser is opened).
+        location.$location.compactMap { $0 }.receive(on: RunLoop.main)
+            .sink { [weak self] coord in self?.catalog.resort(near: coord) }.store(in: &cancellables)
 
         if let c = current { engine.load(c) }
         refreshCatalog()
