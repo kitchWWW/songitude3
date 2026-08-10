@@ -20,6 +20,8 @@ bundle.zip
   "name": "How Fragile We Bloom",   // title; shown as the lock-screen "track" title
   "creator": "Chromic Duo",         // author/composer (optional)
   "about": "A meditative walk …",   // description, up to 2000 chars (optional)
+  "introColor": "#101014",          // backdrop of the app's intro card (absent/null ⇒ the app's own
+                                    //   background, following its light/dark setting)
   "albumArt": "albumart.jpg",       // filename in the zip root, or null
   "intro": "intro.mp3",             // filename under audio/, or null — plays once when a walk begins
   "introGain": 1.0,                 // 0..1 playback level for the intro clip (absent ⇒ 1.0)
@@ -63,6 +65,26 @@ bundle.zip
   ]
 }
 ```
+
+### Intro card (`introColor`)
+
+Opening a walk in the iOS app shows a card over the map with the walk's `name`, its `creator`
+(linked to the artist's page when the walk was published with an `artistId`) and its `about` text.
+`introColor` is the card's background, authored on the editor's **Details** tab. The editor's
+"Use system color" checkbox is on by default and writes **no colour at all** (`null`), which tells
+every reader to use its own background — in the iOS app that means the card matches the rest of the
+app and follows its Light/Dark/System setting. When a colour *is* authored, readers honour it and
+pick black or white text from its luminance, so any backdrop stays readable.
+
+An artist's page colour (`bgColor` in `artists/<id>.json`) follows the same rule: absent ⇒ the app's
+own background.
+
+The card is shown the first time a walk is opened in a rolling ~10 minute window, so moving around
+the app doesn't keep re-showing it. It is dismissed by its play button (which also starts playback)
+or the ✕ in its top-left corner, and can be summoned again by tapping the walk's name in the top bar.
+
+The field is UI-only: it does not affect playback, and players that don't draw an intro card
+(the web player today) simply ignore it.
 
 ### Playback modes (identical semantics in the web preview and the iOS app)
 

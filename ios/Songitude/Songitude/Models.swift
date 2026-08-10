@@ -148,6 +148,9 @@ extension SoundShape {
 struct SoundMap: Codable {
     let version: Int
     let name: String
+    let creator: String?        // author/composer (absent on very early bundles)
+    let about: String?          // description shown on the intro card
+    let introColor: String?     // "#rrggbb" backdrop for the intro card (absent ⇒ "#101014")
     let albumArt: String?
     let intro: String?          // audio/ filename played once at the start of a walk
     let introGain: Double?      // 0..1 level for the intro clip (absent ⇒ 1.0)

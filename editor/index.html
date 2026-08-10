@@ -26,9 +26,10 @@
       <div class="menu-wrap">
         <button id="menuBtn" class="primary">☰ Menu ▾</button>
         <div id="menu" class="menu" hidden>
-          <button id="mImport">⇪ Import .zip</button>
+          <button id="mImport">⇧ Import .zip</button>
           <button id="mExport">⇩ Export .zip</button>
           <button id="mWalks" hidden>🗂 My walks</button>
+          <button id="mArtist" hidden>🎨 Artist details</button>
           <button id="mPublish" class="menu-publish" hidden>☁ Publish to app</button>
           <button id="mLogout" hidden>⎋ Log out</button>
         </div>
@@ -83,16 +84,18 @@
         <div class="details-form">
           <label class="field">
             <span class="field-label">Title</span>
-            <input id="mapName" type="text" placeholder="Untitled sound walk" />
+            <input id="mapName" type="text" placeholder="Untitled soundwalk" />
           </label>
           <label class="field">
             <span class="field-label">Creator</span>
-            <input id="mapCreator" type="text" placeholder="Your name or ensemble" />
+            <input id="mapCreator" type="text" readonly placeholder="Set your artist display name" />
+            <span class="field-hint">Your artist display name — edit it in
+              <button type="button" id="creatorArtistLink" class="linkish">Artist details</button>.</span>
           </label>
           <label class="field">
             <span class="field-label">About</span>
             <textarea id="mapAbout" rows="6" maxlength="2000"
-              placeholder="Describe this sound walk (up to 2000 characters)."></textarea>
+              placeholder="Describe this soundwalk (up to 2000 characters)."></textarea>
             <span id="aboutCount" class="field-count">0 / 2000</span>
           </label>
           <div class="field">
@@ -128,6 +131,15 @@
               <button class="clip-clear" id="exitClear" title="Remove" hidden>✕</button>
               <input id="exitInput" type="file" accept="audio/*" hidden />
             </div>
+          </div>
+          <div class="field">
+            <span class="field-label">Intro card background
+              <span class="field-hint">— the colour of the card shown when a listener opens this walk</span></span>
+            <label class="check-row">
+              <input type="checkbox" id="mapIntroColorAuto" checked />
+              <span>Use system color</span>
+            </label>
+            <input id="mapIntroColor" type="color" value="#101014" />
           </div>
           <div class="field">
             <span class="field-label">Dialogue colors
@@ -193,14 +205,17 @@
       <img id="successQr" class="success-qr" alt="QR code" />
       <p class="success-qrcap">Scan with an iPhone that has the Songitude app to open this walk.</p>
       <a id="successLink" class="success-link" target="_blank" rel="noopener"></a>
-      <button id="successDownload" class="primary" style="margin-top:16px">⬇ Download QR code</button>
+      <div class="success-actions">
+        <button id="successCopy">🔗 Copy link</button>
+        <button id="successDownload" class="primary">⬇ Download QR code</button>
+      </div>
     </div>
   </div>
 
   <div id="walksModal" class="modal-overlay" hidden>
     <div class="modal">
       <div class="modal-head">
-        <h2>My sound walks</h2>
+        <h2>My soundwalks</h2>
         <button class="modal-x" id="walksClose" title="Close">✕</button>
       </div>
       <div class="modal-body">
@@ -209,11 +224,55 @@
     </div>
   </div>
 
+  <div id="artistModal" class="modal-overlay" hidden>
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <h2>Artist details</h2>
+        <button class="modal-x" id="artistClose" title="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="field">
+          <span class="field-label">Display name</span>
+          <input id="artistName" type="text" maxlength="120" placeholder="Your name or ensemble" />
+          <span class="field-hint">Shown as the creator on every walk you publish.</span>
+        </label>
+
+        <div class="field">
+          <span class="field-label">Page background</span>
+          <label class="check-row">
+            <input type="checkbox" id="artistBgAuto" checked />
+            <span>Use system colors — background and text follow the app's light/dark setting</span>
+          </label>
+          <span class="color-row">
+            <input id="artistBg" type="color" value="#101014" />
+            <input id="artistBgHex" type="text" class="hex" maxlength="7" spellcheck="false" />
+          </span>
+        </div>
+
+        <div class="field">
+          <span class="field-label">Bio <span class="field-note">(Markdown)</span></span>
+          <div class="md-split">
+            <textarea id="artistBio" class="md-source" spellcheck="false" maxlength="20000"
+              placeholder="# About me&#10;&#10;Write your artist page here. **Bold**, _italic_, [links](https://…), lists — all fine."></textarea>
+            <div id="artistPreview" class="md-preview"></div>
+          </div>
+          <span id="artistBioCount" class="field-count">0 / 20000</span>
+        </div>
+
+        <div id="artistError" class="gate-error" hidden></div>
+      </div>
+      <div class="modal-foot">
+        <button id="artistCancel">Cancel</button>
+        <button id="artistSave" class="primary">Save artist details</button>
+      </div>
+    </div>
+  </div>
+
   <div id="loginGate" hidden>
     <div class="login-card">
       <div class="login-dot"></div>
       <h2>Sign in to Songitude</h2>
-      <p>Composing and publishing sound walks requires an approved Google account.</p>
+      <p>Composing and publishing soundwalks requires an approved Google account.</p>
       <div id="gbtn"></div>
       <div id="gateError" class="gate-error" hidden></div>
     </div>
@@ -226,6 +285,10 @@
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"
           integrity="sha512-XMVd28F1oH/O71fzwBnV7HucLxVwtxf26XV8P4wPk26EDxuGZ91N8bsOttmnomcCD3CS5ZMRL50H0GgOHvegtg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"
+          integrity="sha384-/TQbtLCAerC3jgaim+N78RZSDYV7ryeoBCVqTuzRrFec2akfBkHS7ACQ3PQhvMVi" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"
+          integrity="sha384-+VfUPEb0PdtChMwmBcBmykRMDd+v6D/oFmB3rZM/puCMDYcIvF968OimRh4KQY9a" crossorigin="anonymous"></script>
   <script src="editor.js"></script>
 </body>
 </html>

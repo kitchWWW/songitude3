@@ -2,10 +2,14 @@
 // Verifies a Google ID token against an allowlist, then returns a presigned S3 PUT URL so the
 // browser uploads the (possibly huge) bundle zip DIRECTLY to S3 — no file passes through Lambda.
 //
+// It also stores per-artist profiles (display name + markdown bio + page colour) at
+// artists/<artistId>.json, where artistId is derived from the signed-in email so it is stable
+// across sessions and never exposes the address itself.
+//
 // Env: WALKS_BUCKET, GOOGLE_CLIENT_ID, ALLOWED_EMAILS (comma-separated), ALLOW_ORIGIN
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { randomUUID } from "crypto";
+import { randomUUID, createHash } from "crypto";
 
 const BUCKET = process.env.WALKS_BUCKET;
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
@@ -30,6 +34,37 @@ function slug(s) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "walk";
 }
 
+// Stable public id for an artist. A hash keeps the account's email out of every published object
+// while still resolving to the same profile on every sign-in.
+function artistIdFor(email) {
+  return createHash("sha256").update(String(email).toLowerCase()).digest("hex").slice(0, 16);
+}
+
+
+async function readArtist(artistId) {
+  try {
+    const g = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: `artists/${artistId}.json` }));
+    return JSON.parse(await g.Body.transformToString());
+  } catch { return null; }
+}
+
+async function writeArtist(artistId, body) {
+  const bg = String(body.bgColor || "");
+  const profile = {
+    id: artistId,
+    name: String(body.name || "").slice(0, 120),
+    bio: String(body.bio || "").slice(0, 20000),       // markdown source
+    // null ⇒ the artist chose "use system colors"; every reader supplies its own background.
+    bgColor: /^#[0-9a-fA-F]{6}$/.test(bg) ? bg.toLowerCase() : null,
+    updatedAt: new Date().toISOString(),
+  };
+  await s3.send(new PutObjectCommand({
+    Bucket: BUCKET, Key: `artists/${artistId}.json`,
+    Body: JSON.stringify(profile), ContentType: "application/json", CacheControl: "no-cache",
+  }));
+  return profile;
+}
+
 export const handler = async (event) => {
   const origin = event?.headers?.origin || event?.headers?.Origin || "";
   if (ALLOWED_ORIGINS.includes(origin)) currentOrigin = origin;
@@ -50,8 +85,22 @@ export const handler = async (event) => {
 
     const body = JSON.parse(event.body || "{}");
     // Lightweight access check used by the editor gate right after sign-in.
-    if (body.check === true) return resp(200, JSON.stringify({ authorized, email }));
+    if (body.check === true) {
+      const artistId = artistIdFor(email);
+      const artist = authorized ? await readArtist(artistId) : null;
+      return resp(200, JSON.stringify({ authorized, email, artistId, artist }));
+    }
     if (!authorized) return resp(403, "This Google account isn't approved yet. Email brian.e2014@gmail.com to request access.");
+
+    // Artist profile — always scoped to the caller's own id, so one account can't edit another's.
+    if (body.action === "artistGet" || body.action === "artistPut") {
+      const artistId = artistIdFor(email);
+      if (body.action === "artistGet") {
+        const artist = await readArtist(artistId);
+        return resp(200, JSON.stringify({ artistId, artist }));
+      }
+      return resp(200, JSON.stringify({ artistId, artist: await writeArtist(artistId, body) }));
+    }
 
     // Manage an existing walk — owner only.
     if (body.action === "delete" || body.action === "update") {
@@ -74,10 +123,15 @@ export const handler = async (event) => {
 };
 
 async function writeMetaAndPresign(walkId, body, email) {
+  // The artist profile is the single source of truth for the display name when one exists, so a
+  // rename propagates to every walk on its next publish instead of drifting per bundle.
+  const artistId = artistIdFor(email);
+  const artist = await readArtist(artistId);
   const meta = {
     id: walkId,
     name: String(body.name || "Untitled sound walk").slice(0, 120),
-    creator: String(body.creator || "").slice(0, 120),
+    creator: String(artist?.name || body.creator || "").slice(0, 120),
+    artistId,
     about: String(body.about || "").slice(0, 2000),
     center: Array.isArray(body.center) ? body.center : null,
     zoom: Number(body.zoom) || 16,

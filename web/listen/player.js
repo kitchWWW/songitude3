@@ -372,7 +372,7 @@
     if (!("mediaSession" in navigator) || !walk) return;
     const art = walk.map.albumArt ? [{ src: `${walk.base}/${encodeURIComponent(walk.map.albumArt)}`, sizes: "512x512", type: "image/jpeg" }] : [];
     try {
-      navigator.mediaSession.metadata = new MediaMetadata({ title: walk.map.name || "Sound walk", artist: walk.map.creator || "Songitude", artwork: art });
+      navigator.mediaSession.metadata = new MediaMetadata({ title: walk.map.name || "Soundwalk", artist: walk.map.creator || "Songitude", artwork: art });
       navigator.mediaSession.setActionHandler("play", () => { if (!running) play(); });
       navigator.mediaSession.setActionHandler("pause", () => { if (running) stop(); });
     } catch (_) {}
@@ -462,7 +462,7 @@
       dialogueQueue = []; dialoguePlaying = null;
       drawShapes();
       if (Array.isArray(mapData.center)) lmap.setView(mapData.center, mapData.zoom || 16);
-      $("titleBtn").textContent = (mapData.name || "Sound walk") + " ▾";
+      $("titleBtn").textContent = (mapData.name || "Soundwalk") + " ▾";
       setMediaMeta();
       $("playBtn").disabled = false;
       $("welcomeOverlay").hidden = true;

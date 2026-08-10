@@ -20,6 +20,11 @@
 		1A000000000000000000081A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000071A /* SettingsView.swift */; };
 		1A000000000000000000081B /* RemoteCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000071B /* RemoteCatalog.swift */; };
 		1A000000000000000000081C /* WalksBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000071C /* WalksBrowserView.swift */; };
+		1A000000000000000000081D /* WalkRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000071D /* WalkRow.swift */; };
+		1A000000000000000000081E /* ArtistPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000071E /* ArtistPageView.swift */; };
+		1A000000000000000000081F /* WalkIntroCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000071F /* WalkIntroCard.swift */; };
+		1A0000000000000000000820 /* SongitudeMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000720 /* SongitudeMark.swift */; };
+		1A0000000000000000000821 /* SplashRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000721 /* SplashRootView.swift */; };
 		1A0000000000000000000902 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000702 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -40,6 +45,11 @@
 		1A000000000000000000071A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		1A000000000000000000071B /* RemoteCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteCatalog.swift; sourceTree = "<group>"; };
 		1A000000000000000000071C /* WalksBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalksBrowserView.swift; sourceTree = "<group>"; };
+		1A000000000000000000071D /* WalkRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalkRow.swift; sourceTree = "<group>"; };
+		1A000000000000000000071E /* ArtistPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtistPageView.swift; sourceTree = "<group>"; };
+		1A000000000000000000071F /* WalkIntroCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalkIntroCard.swift; sourceTree = "<group>"; };
+		1A0000000000000000000720 /* SongitudeMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongitudeMark.swift; sourceTree = "<group>"; };
+		1A0000000000000000000721 /* SplashRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashRootView.swift; sourceTree = "<group>"; };
 		1A0000000000000000000703 /* Songitude.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Songitude.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -97,6 +107,11 @@
 				1A0000000000000000000719 /* OnboardingView.swift */,
 				1A000000000000000000071A /* SettingsView.swift */,
 				1A000000000000000000071C /* WalksBrowserView.swift */,
+				1A0000000000000000000721 /* SplashRootView.swift */,
+				1A0000000000000000000720 /* SongitudeMark.swift */,
+				1A000000000000000000071F /* WalkIntroCard.swift */,
+				1A000000000000000000071E /* ArtistPageView.swift */,
+				1A000000000000000000071D /* WalkRow.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -206,6 +221,11 @@
 				1A000000000000000000081A /* SettingsView.swift in Sources */,
 				1A000000000000000000081B /* RemoteCatalog.swift in Sources */,
 				1A000000000000000000081C /* WalksBrowserView.swift in Sources */,
+				1A0000000000000000000821 /* SplashRootView.swift in Sources */,
+				1A0000000000000000000820 /* SongitudeMark.swift in Sources */,
+				1A000000000000000000081F /* WalkIntroCard.swift in Sources */,
+				1A000000000000000000081E /* ArtistPageView.swift in Sources */,
+				1A000000000000000000081D /* WalkRow.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

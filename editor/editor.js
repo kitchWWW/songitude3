@@ -7,12 +7,14 @@
   "use strict";
 
   // ---------------------------------------------------------------- state ----
+  const DEFAULT_INTRO_COLOR = "#101014";
   const state = {
     mode: "edit",              // "edit" | "listen"
     tool: "select",            // "select" | "polygon" | "circle"
     name: "",
     creator: "",
     about: "",
+    introColor: null,          // backdrop of the app's "about this walk" card; null ⇒ system default
     walkId: null,              // set if this document is a published walk the user owns (update vs new)
     center: [40.7128, -74.006],
     zoom: 15,
@@ -1242,9 +1244,10 @@
   function bundleMeta() {
     return {
       version: 1,
-      name: state.name || "Untitled sound walk",
+      name: state.name || "Untitled soundwalk",
       creator: state.creator || "",
       about: state.about || "",
+      introColor: state.introColor || null,
       albumArt: state.albumArt ? state.albumArt.name : null,
       intro: state.introAudio || null,
       introGain: state.introGain,
@@ -1277,11 +1280,25 @@
     return { blob, bundle, usedAudio };
   }
 
+  /// Put a button into a busy state: a spinner that keeps spinning across label changes (we only
+  /// touch the text node — re-setting innerHTML would restart its CSS animation on every tick)
+  /// and a fixed width so a counting percentage can't resize the button.
+  function busyButton(btn) {
+    const original = btn.innerHTML;
+    btn.classList.add("btn-busy");
+    btn.innerHTML = `<span class="spinner"></span><span class="btn-busy-label"></span>`;
+    const label = btn.querySelector(".btn-busy-label");
+    return {
+      set(text) { label.textContent = text; },
+      restore() { btn.classList.remove("btn-busy"); btn.innerHTML = original; },
+    };
+  }
+
   async function exportZip() {
     const btn = $("menuBtn");
     if (btn.disabled) return;                       // guard against double-clicks
-    const original = btn.innerHTML;
-    const label = (pct) => { btn.innerHTML = `<span class="spinner"></span> Exporting ${pct}%`; };
+    const busyBtn = busyButton(btn);
+    const label = (pct) => busyBtn.set(`Exporting ${pct}%`);
     btn.disabled = true; label(0);
     try {
       const { blob, usedAudio } = await buildBundleZip((p) => label(p));
@@ -1294,7 +1311,7 @@
       toast("Export failed: " + err.message, "err");
     } finally {
       btn.disabled = false;
-      btn.innerHTML = original;
+      busyBtn.restore();
     }
   }
 
@@ -1344,8 +1361,9 @@
 
       // meta
       state.name = bundle.name || "";
-      state.creator = bundle.creator || "";
+      state.creator = (artistProfile && artistProfile.name) || bundle.creator || "";
       state.about = bundle.about || "";
+      state.introColor = bundle.introColor || null;
       state.introAudio = (bundle.intro && audioStore.has(bundle.intro)) ? bundle.intro : null;
       state.introGain = bundle.introGain ?? 1.0;
       state.exitAudio = (bundle.exit && audioStore.has(bundle.exit)) ? bundle.exit : null;
@@ -1459,6 +1477,7 @@
   function snapshot() {
     return JSON.stringify({
       name: state.name, creator: state.creator, about: state.about,
+      introColor: state.introColor,
       albumArt: state.albumArt ? state.albumArt.name : null,
       intro: state.introAudio || null,
       introGain: state.introGain,
@@ -1486,6 +1505,7 @@
     state.name = snap.name || "";
     state.creator = snap.creator || "";
     state.about = snap.about || "";
+    state.introColor = snap.introColor || null;
     state.introAudio = (snap.intro && audioStore.has(snap.intro)) ? snap.intro : null;
     state.introGain = snap.introGain ?? 1.0;
     state.exitAudio = (snap.exit && audioStore.has(snap.exit)) ? snap.exit : null;
@@ -1540,6 +1560,10 @@
     $("mapCreator").value = state.creator || "";
     $("mapAbout").value = state.about || "";
     $("aboutCount").textContent = (state.about || "").length + " / 2000";
+    const auto = !state.introColor;
+    $("mapIntroColorAuto").checked = auto;
+    $("mapIntroColor").disabled = auto;
+    $("mapIntroColor").value = state.introColor || DEFAULT_INTRO_COLOR;
     $("dcUnplayed").value = dColor("unplayed");
     $("dcQueued").value = dColor("queued");
     $("dcPlaying").value = dColor("playing");
@@ -1587,6 +1611,14 @@
   $("mapCreator").onchange = () => commit();
   $("mapAbout").oninput = (e) => { state.about = e.target.value; $("aboutCount").textContent = state.about.length + " / 2000"; };
   $("mapAbout").onchange = () => commit();
+  $("mapIntroColorAuto").onchange = (e) => {
+    // Checked → publish no colour at all, so each player uses its own default.
+    state.introColor = e.target.checked ? null : $("mapIntroColor").value.toLowerCase();
+    $("mapIntroColor").disabled = e.target.checked;
+    commit();
+  };
+  $("mapIntroColor").oninput = (e) => { state.introColor = e.target.value.toLowerCase(); };
+  $("mapIntroColor").onchange = () => commit();
   // Per-walk dialogue state colors (Details tab). Recolor the map live; commit on release.
   for (const [key, id] of Object.entries({ unplayed: "dcUnplayed", queued: "dcQueued", playing: "dcPlaying", finished: "dcFinished" })) {
     $(id).oninput = (e) => {
@@ -1681,12 +1713,15 @@
     $("accountEmail").hidden = false;
     $("mPublish").hidden = !publishReady;
     $("mWalks").hidden = !publishReady;
+    $("mArtist").hidden = !publishReady;
     $("mLogout").hidden = false;
   }
   function applySignedOut() {
     idToken = null; userEmail = null;
     $("accountEmail").hidden = true;
-    $("mPublish").hidden = true; $("mWalks").hidden = true; $("mLogout").hidden = true;
+    $("mPublish").hidden = true; $("mWalks").hidden = true; $("mArtist").hidden = true;
+    $("mLogout").hidden = true;
+    artistProfile = null;
     $("loginGate").hidden = false;
   }
   function verifyToken() {
@@ -1709,7 +1744,10 @@
       idToken = stored.token; userEmail = stored.email;
       applySignedIn(userEmail);
       // Re-verify in the background; if it's been revoked/de-listed, fall back to the gate.
-      if (publishReady) verifyToken().then((d) => { if (!d || !d.authorized) { clearAuth(); applySignedOut(); } }).catch(() => {});
+      if (publishReady) verifyToken().then((d) => {
+        if (!d || !d.authorized) { clearAuth(); applySignedOut(); return; }
+        applyArtistProfile(d.artist);
+      }).catch(() => {});
     } else {
       $("loginGate").hidden = false;   // gate the editor until signed in
     }
@@ -1729,6 +1767,7 @@
       try {
         const data = await verifyToken();
         if (!data || !data.authorized) { rejectAccess(); return; }
+        applyArtistProfile(data.artist);
       } catch (_) { rejectAccess(); return; }
     }
     saveAuth();                 // remember across refreshes
@@ -1826,8 +1865,8 @@
   async function runPublish(mode) {   // mode: "new" | "update"
     const btn = mode === "update" ? $("pubUpdate") : $("pubGo");
     if (btn.disabled) return;
-    const orig = btn.innerHTML;
-    const label = (t) => { btn.innerHTML = `<span class="spinner"></span> ${t}`; };
+    const busyBtn = busyButton(btn);
+    const label = (t) => busyBtn.set(t);
     const busy = (b) => { ["pubCancel", "pubClose", "pubConfirm", "pubGo", "pubUpdate"].forEach((id) => $(id).disabled = b); };
     busy(true); $("pubError").hidden = true;
     try {
@@ -1855,7 +1894,7 @@
       $("pubError").textContent = "Publish failed: " + err.message;
       $("pubError").hidden = false;
     } finally {
-      busy(false); btn.innerHTML = orig; updatePubGo();
+      busy(false); busyBtn.restore(); updatePubGo();
     }
   }
 
@@ -1879,7 +1918,7 @@
   }
   function showSuccess(name, walkId) {
     const url = "https://songitude.com/w.html?walk=" + encodeURIComponent(walkId);
-    $("successMsg").innerHTML = `<b>${name}</b> is now available in the app.`;
+    $("successMsg").innerHTML = `<b>${name}</b><br>is now available in the app.`;
     $("successLink").textContent = url; $("successLink").href = url;
     lastQrName = (name || "soundwalk").replace(/[^\w.-]+/g, "_");
     lastQrDataUrl = null;
@@ -1969,6 +2008,108 @@
     } catch (e) { toast("Delete failed: " + e.message, "err"); btn.disabled = false; btn.innerHTML = orig; }
   }
 
+
+  // ---- Artist details: display name + markdown bio + page colour, stored per account --------
+  // The profile lives server-side at artists/<id>.json (id derived from the Google account), so
+  // one edit re-labels every walk instead of each bundle carrying its own creator string.
+  const ARTIST_BG_DEFAULT = "#101014";
+  let artistProfile = null;
+
+  function renderArtistPreview(src) {
+    const box = $("artistPreview");
+    const text = (src || "").trim();
+    if (!text) { box.innerHTML = `<p class="md-preview-empty">Your bio preview appears here.</p>`; return; }
+    // Sanitize even though it is the author's own text — the same markdown is rendered elsewhere.
+    if (window.marked && window.DOMPurify) box.innerHTML = DOMPurify.sanitize(marked.parse(text, { breaks: true }));
+    else box.textContent = text;                     // CDN blocked → readable fallback
+  }
+
+  /// Adopt a profile from the server: the display name is the creator on every walk.
+  function applyArtistProfile(p) {
+    if (!p) return;
+    artistProfile = p;
+    if (p.name) { state.creator = p.name; $("mapCreator").value = p.name; }
+    // A brand-new document starts from the artist's own page colour (or stays on the system
+    // default if that is what they use). An imported or loaded walk keeps whatever it shipped with.
+    if (isUntouchedDocument()) {
+      state.introColor = p.bgColor || null;
+      syncDetailsInputs();
+    }
+  }
+
+  /// True for a fresh, never-edited document — nothing drawn, nothing imported, not a published walk.
+  function isUntouchedDocument() {
+    return !state.walkId && !dirty && state.shapes.length === 0;
+  }
+
+  /// `hex` null/blank ⇒ "use system colors": the swatch shows the fallback but is disabled, and
+  /// saving writes no colour so the app supplies its own background and text.
+  function setArtistBg(hex) {
+    const custom = /^#[0-9a-fA-F]{6}$/.test(hex || "");
+    const v = custom ? hex.toLowerCase() : ARTIST_BG_DEFAULT;
+    $("artistBgAuto").checked = !custom;
+    $("artistBg").disabled = !custom;
+    $("artistBgHex").disabled = !custom;
+    $("artistBg").value = v; $("artistBgHex").value = v;
+  }
+  function updateArtistBioCount() {
+    $("artistBioCount").textContent = `${$("artistBio").value.length} / 20000`;
+  }
+
+  function openArtistModal() {
+    if (!idToken || !userEmail) { toast("Sign in with Google first.", "err"); return; }
+    closeMenu();
+    const p = artistProfile || {};
+    $("artistError").hidden = true;
+    $("artistName").value = p.name || state.creator || "";
+    $("artistBio").value = p.bio || "";
+    setArtistBg(p.bgColor);
+    updateArtistBioCount();
+    renderArtistPreview($("artistBio").value);
+    $("artistModal").hidden = false;
+  }
+
+  async function saveArtistDetails() {
+    const btn = $("artistSave");
+    const orig = btn.innerHTML;
+    const name = $("artistName").value.trim();
+    if (!name) { $("artistError").textContent = "A display name is required."; $("artistError").hidden = false; return; }
+    btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Saving…`;
+    $("artistError").hidden = true;
+    try {
+      const r = await fetch(CFG.publishApiUrl, {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + idToken, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "artistPut", name, bio: $("artistBio").value,
+          bgColor: $("artistBgAuto").checked ? null : $("artistBg").value,
+        }),
+      });
+      if (!r.ok) throw new Error((await r.text().catch(() => "")) || ("HTTP " + r.status));
+      applyArtistProfile((await r.json()).artist);
+      $("artistModal").hidden = true;
+      toast("Artist details saved. Republish a walk to update its credit.", "ok");
+    } catch (e) {
+      $("artistError").textContent = "Couldn't save: " + e.message;
+      $("artistError").hidden = false;
+    } finally { btn.disabled = false; btn.innerHTML = orig; }
+  }
+
+  $("mArtist").onclick = openArtistModal;
+  $("creatorArtistLink").onclick = openArtistModal;
+  $("artistClose").onclick = () => { $("artistModal").hidden = true; };
+  $("artistCancel").onclick = () => { $("artistModal").hidden = true; };
+  $("artistSave").onclick = saveArtistDetails;
+  $("artistBio").oninput = () => { updateArtistBioCount(); renderArtistPreview($("artistBio").value); };
+  $("artistBgAuto").onchange = (e) => {
+    $("artistBg").disabled = e.target.checked;
+    $("artistBgHex").disabled = e.target.checked;
+  };
+  $("artistBg").oninput = (e) => { $("artistBgHex").value = e.target.value.toLowerCase(); };
+  $("artistBgHex").oninput = (e) => {
+    if (/^#[0-9a-fA-F]{6}$/.test(e.target.value)) $("artistBg").value = e.target.value.toLowerCase();
+  };
+
   $("pubClose").onclick = closePublishModal;
   $("pubCancel").onclick = closePublishModal;
   $("pubConfirm").onchange = updatePubGo;
@@ -1976,6 +2117,20 @@
   $("pubUpdate").onclick = () => runPublish("update");
   $("successClose").onclick = () => { $("successModal").hidden = true; };
   $("successDownload").onclick = downloadQr;
+  $("successCopy").onclick = async () => {
+    const url = $("successLink").href;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast("Link copied.", "ok");
+    } catch (_) {
+      // Clipboard API needs a secure context / permission — fall back to a manual select.
+      const t = document.createElement("textarea");
+      t.value = url; document.body.appendChild(t); t.select();
+      const ok = document.execCommand("copy");
+      t.remove();
+      toast(ok ? "Link copied." : "Couldn't copy — select the link above.", ok ? "ok" : "err");
+    }
+  };
   $("walksClose").onclick = () => { $("walksModal").hidden = true; };
   initAuth();
 

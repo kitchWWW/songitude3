@@ -27,11 +27,12 @@ echo "==> Public-access block (allow a public read policy; keep ACLs off)"
 aws s3api put-public-access-block --bucket "$BUCKET" --public-access-block-configuration \
   BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=false,RestrictPublicBuckets=false
 
-echo "==> Bucket policy: public GET on walks/* only"
+echo "==> Bucket policy: public GET on walks/* and artists/* only"
 aws s3api put-bucket-policy --bucket "$BUCKET" --policy "{
   \"Version\":\"2012-10-17\",
   \"Statement\":[{\"Sid\":\"PublicReadWalks\",\"Effect\":\"Allow\",\"Principal\":\"*\",
-    \"Action\":\"s3:GetObject\",\"Resource\":\"arn:aws:s3:::$BUCKET/walks/*\"}]
+    \"Action\":\"s3:GetObject\",
+    \"Resource\":[\"arn:aws:s3:::$BUCKET/walks/*\",\"arn:aws:s3:::$BUCKET/artists/*\"]}]
 }"
 
 echo "==> CORS (GET/HEAD for players, PUT for presigned upload from the editor)"
@@ -58,7 +59,9 @@ aws iam put-role-policy --role-name "$ROLE" --policy-name inline --policy-docume
 ROLE_ARN="arn:aws:iam::${ACCT}:role/${ROLE}"
 echo "    role propagation…"; sleep 12
 
-deploy_fn () {  # name dir handlerEnv timeout
+deploy_fn () {  # name dir envVarsJson timeout
+  # envVarsJson is a JSON object: the shorthand Variables={k=v,...} form breaks on any value
+  # containing a comma (e.g. a multi-address ALLOWED_EMAILS).
   local name="$1" dir="$2" env="$3" timeout="$4"
   rm -f "/tmp/$name.zip"
   ( cd "$HERE/$dir"
@@ -73,17 +76,17 @@ deploy_fn () {  # name dir handlerEnv timeout
     aws lambda update-function-code --function-name "$name" --zip-file "fileb:///tmp/$name.zip" >/dev/null
     aws lambda wait function-updated --function-name "$name"
     aws lambda update-function-configuration --function-name "$name" \
-      --environment "Variables={$env}" --timeout "$timeout" >/dev/null
+      --environment "{\"Variables\":$env}" --timeout "$timeout" >/dev/null
   else
     aws lambda create-function --function-name "$name" --runtime nodejs20.x --role "$ROLE_ARN" \
       --handler index.handler --zip-file "fileb:///tmp/$name.zip" \
-      --environment "Variables={$env}" --timeout "$timeout" --memory-size 256 >/dev/null
+      --environment "{\"Variables\":$env}" --timeout "$timeout" --memory-size 256 >/dev/null
   fi
 }
 
 echo "==> Presign Lambda"
 deploy_fn "$PRESIGN_FN" presign \
-  "WALKS_BUCKET=$BUCKET,GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID,ALLOWED_EMAILS=$ALLOWED_EMAILS,ALLOW_ORIGIN=$ALLOW_ORIGIN" 15
+  "{\"WALKS_BUCKET\":\"$BUCKET\",\"GOOGLE_CLIENT_ID\":\"$GOOGLE_CLIENT_ID\",\"ALLOWED_EMAILS\":\"$ALLOWED_EMAILS\",\"ALLOW_ORIGIN\":\"$ALLOW_ORIGIN\"}" 15
 
 # Function URL (public; auth is enforced inside via the Google token)
 CORS_JSON="{\"AllowOrigins\":[\"$ALLOW_ORIGIN\",\"http://localhost:8000\",\"http://localhost:5173\"],\"AllowMethods\":[\"POST\"],\"AllowHeaders\":[\"authorization\",\"content-type\"],\"MaxAge\":3000}"
@@ -94,7 +97,7 @@ aws lambda add-permission --function-name "$PRESIGN_FN" --statement-id fnurl \
 FN_URL="$(aws lambda get-function-url-config --function-name "$PRESIGN_FN" --query FunctionUrl --output text)"
 
 echo "==> Manifest Lambda"
-deploy_fn "$MANIFEST_FN" manifest "WALKS_BUCKET=$BUCKET,PUBLIC_BASE=$PUBLIC_BASE" 60
+deploy_fn "$MANIFEST_FN" manifest "{\"WALKS_BUCKET\":\"$BUCKET\",\"PUBLIC_BASE\":\"$PUBLIC_BASE\"}" 60
 aws lambda add-permission --function-name "$MANIFEST_FN" --statement-id s3invoke \
   --action lambda:InvokeFunction --principal s3.amazonaws.com \
   --source-arn "arn:aws:s3:::$BUCKET" >/dev/null 2>&1 || true

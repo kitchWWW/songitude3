@@ -6,11 +6,13 @@ import CoreLocation
 struct SettingsView: View {
     @EnvironmentObject var app: AppState
     @Environment(\.dismiss) private var dismiss
+    @State private var confirmReset = false
 
     var body: some View {
         NavigationView {
             Form {
                 permissionsSection
+                appearanceSection
                 creditsSection
                 debugSection
             }
@@ -19,6 +21,14 @@ struct SettingsView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .alert("Reset app?", isPresented: $confirmReset) {
+                Button("Reset", role: .destructive) { app.resetEverything(); dismiss() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Clears preferences, downloaded walks and your progress, and returns to the "
+                     + "welcome screen. The location permission itself can only be reset from the "
+                     + "iOS Settings app.")
             }
         }
     }
@@ -56,6 +66,15 @@ struct SettingsView: View {
         }
     }
 
+    private var appearanceSection: some View {
+        Section("Appearance") {
+            Picker("Theme", selection: $app.appearance) {
+                ForEach(AppAppearance.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+
     // MARK: Debug (hidden away)
 
     private var debugSection: some View {
@@ -68,6 +87,7 @@ struct SettingsView: View {
                 }
                 Button("Upgrade to “Always” location") { app.location.requestAlways() }
                 Button("Reload walk catalog") { app.refreshCatalog() }
+                Button("Reset app", role: .destructive) { confirmReset = true }
             }
         }
     }
@@ -81,18 +101,20 @@ struct SettingsView: View {
         }
     }
 
-    private func creditRow(name: String, role: String, subtitle: String? = nil, url: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                Text(name).font(.headline)
-                Spacer()
-                if let u = URL(string: url) {
-                    Link("Website", destination: u).font(.footnote)
-                }
-            }
-            Text(role).font(.subheadline).foregroundStyle(.secondary)
-            if let subtitle { Text(subtitle).font(.caption).foregroundStyle(.tertiary) }
+    /// Name on the left, role on the right, and the whole row is the link.
+    @ViewBuilder
+    private func creditRow(name: String, role: String, url: String) -> some View {
+        let row = HStack {
+            Text(name).foregroundStyle(.primary)
+            Spacer(minLength: 12)
+            Text(role).foregroundStyle(.secondary)
         }
-        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+
+        if let u = URL(string: url) {
+            Link(destination: u) { row }
+        } else {
+            row
+        }
     }
 }

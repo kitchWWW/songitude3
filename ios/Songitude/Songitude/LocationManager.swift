@@ -15,6 +15,11 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
     /// updates when this is set — i.e. while an experience is playing — and pause them otherwise.
     private var wantsUpdates = false
 
+    /// Set while a one-shot fix is outstanding. That fix updates `location` (so the walks list can
+    /// sort nearest-first) but is deliberately NOT forwarded to `onLocation` — opening a list must
+    /// not drive the audio engine.
+    private var oneShotOnly = false
+
     /// Called on every new fix so the owner can drive the audio engine.
     var onLocation: ((CLLocationCoordinate2D) -> Void)?
 
@@ -36,6 +41,14 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
     /// Used to sort the walk catalog nearest-first; never triggers a new location request.
     var lastKnownLocation: CLLocationCoordinate2D? {
         location ?? (isAuthorized ? manager.location?.coordinate : nil)
+    }
+
+    /// One fix, then nothing — no continuous updates, no background mode. Used when the walks
+    /// list opens so it can be ordered by distance even though playback isn't running.
+    func requestOneShotFix() {
+        guard isAuthorized, !wantsUpdates else { return }
+        oneShotOnly = true
+        manager.requestLocation()
     }
 
     /// The big onboarding button calls this.
@@ -84,6 +97,7 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
         let coord = loc.coordinate
         DispatchQueue.main.async {
             self.location = coord
+            if self.oneShotOnly && !self.wantsUpdates { self.oneShotOnly = false; return }
             self.onLocation?(coord)
         }
     }

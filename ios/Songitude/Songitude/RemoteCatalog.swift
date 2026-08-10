@@ -11,6 +11,9 @@ struct RemoteWalk: Identifiable, Codable {
     let zoom: Double?
     let shapeCount: Int?
     let sizeBytes: Int?
+    let artistId: String?   // absent on walks published before artist pages existed
+    let artUrl: String?     // album art, when the bundle shipped one
+    let updatedAt: String?  // revision stamp; a cached copy older than this is stale
     let base: String        // https://…/walks/<id>
     let mapUrl: String      // https://…/walks/<id>/map.json
 
@@ -23,6 +26,46 @@ struct RemoteWalk: Identifiable, Codable {
 
 struct WalkManifest: Codable { let version: Int; let walks: [RemoteWalk] }
 
+/// An artist's public page, written by the editor and served from artists/<id>.json.
+struct ArtistProfile: Codable {
+    let id: String
+    let name: String?
+    let bio: String?          // markdown source
+    let bgColor: String?      // "#rrggbb"
+
+    var displayName: String { (name?.isEmpty == false) ? name! : "Unknown artist" }
+}
+
+/// Fetches artist profiles on demand and keeps them in memory for the session. Profiles are tiny
+/// and live outside the manifest, so an edited bio shows up without republishing any walk.
+/// Main-queue confined, like RemoteCatalog: `load` is called from views and publishes back on main.
+final class ArtistStore: ObservableObject {
+    @Published private(set) var profiles: [String: ArtistProfile] = [:]
+    @Published private(set) var failed: Set<String> = []
+    private var inFlight: Set<String> = []
+
+    static func url(for id: String) -> URL? {
+        URL(string: "https://songitude-walks.s3.amazonaws.com/artists/\(id).json")
+    }
+
+    func profile(_ id: String) -> ArtistProfile? { profiles[id] }
+
+    func load(_ id: String) {
+        guard profiles[id] == nil, !inFlight.contains(id), let url = Self.url(for: id) else { return }
+        inFlight.insert(id)
+        var req = URLRequest(url: url)
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
+            let decoded = data.flatMap { try? JSONDecoder().decode(ArtistProfile.self, from: $0) }
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.inFlight.remove(id)
+                if let p = decoded { self.profiles[id] = p } else { self.failed.insert(id) }
+            }
+        }.resume()
+    }
+}
+
 /// Fetches the public catalog and keeps it sorted nearest-first using the last-known location
 /// (never requests a new fix).
 final class RemoteCatalog: ObservableObject {
@@ -32,12 +75,15 @@ final class RemoteCatalog: ObservableObject {
 
     static let manifestURL = URL(string: "https://songitude-walks.s3.amazonaws.com/walks/manifest.json")!
 
-    func refresh(near: CLLocationCoordinate2D?) {
+    /// `completion` fires on the main queue once the catalog has settled (success or failure), so
+    /// pull-to-refresh can hold its spinner for the real duration of the fetch.
+    func refresh(near: CLLocationCoordinate2D?, completion: (() -> Void)? = nil) {
         loading = true
         var req = URLRequest(url: Self.manifestURL)
         req.cachePolicy = .reloadIgnoringLocalCacheData
         URLSession.shared.dataTask(with: req) { [weak self] data, _, err in
             DispatchQueue.main.async {
+                defer { completion?() }
                 guard let self = self else { return }
                 self.loading = false
                 guard let data = data, let m = try? JSONDecoder().decode(WalkManifest.self, from: data) else {
@@ -77,8 +123,38 @@ enum WalkDownloader {
         // A ".complete" marker is written only after every file has downloaded.
         FileManager.default.fileExists(atPath: cacheDir(for: id).appendingPathComponent(".complete").path)
     }
+    private static func versionURL(_ id: String) -> URL {
+        cacheDir(for: id).appendingPathComponent(".version")
+    }
+    private static func cachedVersion(_ id: String) -> String? {
+        try? String(contentsOf: versionURL(id), encoding: .utf8)
+    }
+
+    /// A cached walk is only safe to open as-is when it matches the catalog's current revision.
+    /// Republishing keeps the walk's id, so without this check an edited title, description or
+    /// intro colour would never reach a device that had already downloaded the walk.
+    static func isUpToDate(_ walk: RemoteWalk) -> Bool {
+        isDownloaded(walk.id) && cachedVersion(walk.id) == (walk.updatedAt ?? "")
+    }
+
     static func deleteCache(_ id: String) {
         try? FileManager.default.removeItem(at: cacheDir(for: id))
+    }
+    /// Every walk currently complete on disk.
+    static func downloadedIds() -> Set<String> {
+        let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("walks", isDirectory: true)
+        let entries = (try? FileManager.default.contentsOfDirectory(at: root,
+                                                                    includingPropertiesForKeys: nil,
+                                                                    options: [.skipsHiddenFiles])) ?? []
+        return Set(entries.map(\.lastPathComponent).filter(isDownloaded))
+    }
+
+    /// Drop every downloaded walk (used by Settings → Advanced → Reset app).
+    static func deleteAllCaches() {
+        let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("walks", isDirectory: true)
+        try? FileManager.default.removeItem(at: root)
     }
 
     /// Loads an already-downloaded walk from cache (nil if not fully present).
@@ -91,7 +167,10 @@ enum WalkDownloader {
     }
 
     /// Download map.json + all referenced audio + album art. progress in 0...1 on the main queue.
+    /// `mapReady` fires as soon as map.json is parsed — long before the audio arrives — so the UI
+    /// can show the right walk immediately instead of sitting on the previous one.
     static func download(_ walk: RemoteWalk,
+                         mapReady: @escaping (SoundMap) -> Void = { _ in },
                          progress: @escaping (Double) -> Void,
                          completion: @escaping (Result<Experience, Error>) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
@@ -102,6 +181,7 @@ enum WalkDownloader {
                 let mapData = try fetch(walk.mapUrl)
                 try mapData.write(to: dir.appendingPathComponent("map.json"))
                 let map = try JSONDecoder().decode(SoundMap.self, from: mapData)
+                DispatchQueue.main.async { mapReady(map) }
 
                 var rels = Set(map.shapes.compactMap { $0.audioFile }.map { "audio/\($0)" })
                 if let art = map.albumArt, !art.isEmpty { rels.insert(art) }
@@ -123,6 +203,7 @@ enum WalkDownloader {
                     DispatchQueue.main.async { progress(done) }
                 }
                 try? Data().write(to: dir.appendingPathComponent(".complete"))   // mark fully downloaded
+                try? (walk.updatedAt ?? "").write(to: versionURL(walk.id), atomically: true, encoding: .utf8)
                 let exp = Experience(id: walk.id, directory: dir, map: map)
                 DispatchQueue.main.async { completion(.success(exp)) }
             } catch {

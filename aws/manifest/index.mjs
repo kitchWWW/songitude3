@@ -59,8 +59,17 @@ async function rebuildManifest() {
     try {
       const g = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: `walks/${id}/meta.json` }));
       const meta = JSON.parse(await g.Body.transformToString());
+      // The art filename only lives in the bundle, so read it from the unpacked map.json rather
+      // than asking the editor to send it — that way already-published walks get thumbnails too.
+      let artUrl = null;
+      try {
+        const mj = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: `walks/${id}/map.json` }));
+        const art = JSON.parse(await mj.Body.transformToString()).albumArt;
+        if (art) artUrl = `${PUBLIC_BASE}/walks/${id}/${encodeURIComponent(art)}`;
+      } catch { /* no map.json yet, or no art — the app falls back to a placeholder */ }
       items.push({
         id, name: meta.name, creator: meta.creator || "", about: meta.about || "",
+        artistId: meta.artistId || null, artUrl,
         center: meta.center, zoom: meta.zoom, shapeCount: meta.shapeCount, owner: meta.owner,
         updatedAt: meta.updatedAt || w.updatedAt, sizeBytes: w.size,
         base: `${PUBLIC_BASE}/walks/${id}`,

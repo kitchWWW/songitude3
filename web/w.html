@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Songitude — open a sound walk</title>
+  <title>Songitude — open a soundwalk</title>
   <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
   <style>
     :root{--ink:#141a24;--muted:#5b6675;--accent:#2f6bff;--line:#e6e9f1;--soft:#f5f7fb}
     *{box-sizing:border-box}
@@ -31,7 +32,7 @@
     <div class="card">
       <h1 id="title">Open in the Songitude app</h1>
       <p class="creator" id="creator"></p>
-      <p class="about" id="about">This link opens a Songitude sound walk. Install the Songitude
+      <p class="about" id="about">This link opens a Songitude soundwalk. Install the Songitude
         app on your iPhone, then scan or tap again to load it automatically.</p>
       <a class="btn" id="webplayBtn" href="/listen/index.html">▶ Play in the web player</a>
       <a class="btn ghost" href="/">About Songitude</a>
@@ -50,10 +51,10 @@
         const m = await r.json();
         const w = (m.walks || []).find((x) => x.id === id);
         if (!w) return;
-        document.getElementById("title").textContent = w.name || "Sound walk";
+        document.getElementById("title").textContent = w.name || "Soundwalk";
         if (w.creator) document.getElementById("creator").textContent = "by " + w.creator;
         if (w.about) document.getElementById("about").textContent = w.about;
-        document.title = "Songitude — " + (w.name || "sound walk");
+        document.title = "Songitude — " + (w.name || "soundwalk");
       } catch (_) { /* keep the default copy */ }
     })();
   </script>

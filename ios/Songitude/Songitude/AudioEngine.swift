@@ -590,7 +590,14 @@ final class RenderEngine: ObservableObject {
                         })
     }
 
-    private func armDoneTimer() {
+    /// Cancel the pending "All done?" offer. Used while a modal (the walk's intro card) is up, so
+    /// its 30 s only starts counting once the listener is actually looking at the map.
+    func cancelDoneTimer() {
+        doneTimer?.invalidate(); doneTimer = nil
+        canEndSession = false
+    }
+
+    func armDoneTimer() {
         doneTimer?.invalidate()
         canEndSession = false
         doneTimer = Timer.scheduledTimer(withTimeInterval: Self.doneDelay, repeats: false) { [weak self] _ in

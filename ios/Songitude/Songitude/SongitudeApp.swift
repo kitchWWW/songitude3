@@ -7,14 +7,8 @@ struct SongitudeApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                if app.hasOnboarded {
-                    ContentView()
-                } else {
-                    OnboardingView()
-                }
-            }
-            .environmentObject(app)
+            SplashRootView()
+                .environmentObject(app)
             // Universal Link (QR / https://songitude.com/w.html?walk=…) → open that walk as default.
             .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
                 if let url = activity.webpageURL { app.handleDeepLink(url) }
