@@ -1,5 +1,7 @@
 import SwiftUI
 import CoreLocation
+import UIKit
+import ImageIO
 
 /// One walk in a list. Shared by the walks browser and the artist page so both look and behave
 /// identically — same status glyph, same tap-to-open, same swipe-to-uninstall (applied by the
@@ -29,6 +31,7 @@ struct WalkRow: View {
                             .foregroundStyle(m < Self.nearbyMeters ? Color.green : Color.secondary)
                     }
                     if let s = walk.sizeBytes { Text(sizeText(s)) }
+                    if app.isDownloaded(walk.id) { Text("Installed") }
                 }.font(.caption2).foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
@@ -43,26 +46,10 @@ struct WalkRow: View {
     /// Square album art at the leading edge, spanning the title/artist/distance block.
     private var artThumbnail: some View {
         let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
-        return Group {
-            if let s = walk.artUrl, let url = URL(string: s) {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image { image.resizable().scaledToFill() }
-                    else { placeholderArt }        // loading, or the fetch failed
-                }
-            } else {
-                placeholderArt
-            }
-        }
-        .frame(width: 54, height: 54)
-        .clipShape(shape)
-        .overlay(shape.strokeBorder(.primary.opacity(0.08)))
-    }
-
-    private var placeholderArt: some View {
-        ZStack {
-            Color.secondary.opacity(0.15)
-            Image(systemName: "waveform").font(.title3).foregroundStyle(.secondary)
-        }
+        return WalkArtwork(url: walk.artUrl)
+            .frame(width: 54, height: 54)
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(.primary.opacity(0.08)))
     }
 
     @ViewBuilder private var creatorLine: some View {
@@ -165,12 +152,121 @@ extension View {
 /// Swipe-to-uninstall, applied identically wherever a walk row appears in a List.
 extension View {
     func uninstallSwipeAction(for walk: RemoteWalk, app: AppState) -> some View {
+        // Deliberately NOT role: .destructive — that tells the List this action removes the row, so
+        // it animates the row away like a delete. The walk stays in the catalog; only its download
+        // goes. A plain red-tinted button frees the files and lets the swipe close, nothing more.
         swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if app.isDownloaded(walk.id) && app.downloadingWalkId != walk.id {
-                Button(role: .destructive) { app.deleteDownloaded(walk.id) } label: {
+                Button { app.deleteDownloaded(walk.id) } label: {
                     Label("Uninstall", systemImage: "xmark")
+                }
+                .tint(.red)
+            }
+        }
+    }
+}
+
+/// Collapsible list-section header: the title in the page's own voice with a chevron that turns to
+/// point down when open. Used to split the catalog into geo-locked and listen-from-anywhere.
+struct CollapsibleHeader: View {
+    let title: String
+    @Binding var isOpen: Bool
+
+    var body: some View {
+        Button { withAnimation(.easeInOut(duration: 0.18)) { isOpen.toggle() } } label: {
+            HStack(spacing: 6) {
+                Text(title).font(.subheadline.bold()).foregroundStyle(.primary)
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(isOpen ? 0 : -90))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .textCase(nil)
+    }
+}
+
+// MARK: - Artwork
+
+/// Album art for a row. Reads straight from the cache on the first render, so a row that has been
+/// on screen before draws its image immediately instead of flashing the placeholder — which is what
+/// AsyncImage did, since it restarts its load every time the row is rebuilt.
+struct WalkArtwork: View {
+    @ObservedObject private var cache = ArtworkCache.shared
+    let url: String?
+
+    var body: some View {
+        Group {
+            if let url, let image = cache.image(for: url) {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                ZStack {
+                    Color.secondary.opacity(0.15)
+                    Image(systemName: "waveform").font(.title3).foregroundStyle(.secondary)
                 }
             }
         }
+        .onAppear { if let url { cache.load(url) } }
+    }
+}
+
+/// Session-long image cache for walk artwork, backed by its own on-disk URL cache so images also
+/// survive relaunches. It deliberately does NOT use URLSession.shared: that session downloads walk
+/// audio, and letting a 150 MB bundle churn through an image cache would be counterproductive.
+final class ArtworkCache: ObservableObject {
+    static let shared = ArtworkCache()
+
+    /// Bumped whenever an image lands, so rows waiting on one redraw.
+    @Published private(set) var generation = 0
+
+    private let memory: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.countLimit = 300
+        c.totalCostLimit = 32 << 20        // ~32 MB of decoded pixels
+        return c
+    }()
+    private var inFlight: Set<String> = []
+    private let session: URLSession = {
+        let cfg = URLSessionConfiguration.default
+        cfg.urlCache = URLCache(memoryCapacity: 8 << 20, diskCapacity: 128 << 20, diskPath: "songitude-artwork")
+        cfg.requestCachePolicy = .returnCacheDataElseLoad
+        return URLSession(configuration: cfg)
+    }()
+
+    func image(for url: String) -> UIImage? { memory.object(forKey: url as NSString) }
+
+    func load(_ url: String) {
+        guard image(for: url) == nil, !inFlight.contains(url), let u = URL(string: url) else { return }
+        inFlight.insert(url)
+        session.dataTask(with: u) { [weak self] data, _, _ in
+            // Downsample before caching. Album art is multi-megabyte; a 4 MB JPEG decodes to tens
+            // of MB of pixels, and NSCache throws away any object whose cost exceeds its total
+            // limit — so caching full-size images silently evicted almost all of them.
+            let image = data.flatMap { Self.thumbnail(from: $0, maxPixel: 256) }
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.inFlight.remove(url)
+                guard let image = image else { return }
+                let bytes = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
+                self.memory.setObject(image, forKey: url as NSString, cost: bytes)
+                self.generation &+= 1
+            }
+        }.resume()
+    }
+
+    /// Decode straight to thumbnail size — never allocates the full-resolution bitmap.
+    private static func thumbnail(from data: Data, maxPixel: CGFloat) -> UIImage? {
+        guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let opts: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,   // honour EXIF orientation
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
+        return UIImage(cgImage: cg)
     }
 }

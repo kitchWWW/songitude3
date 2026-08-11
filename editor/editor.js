@@ -14,7 +14,12 @@
     name: "",
     creator: "",
     about: "",
-    introColor: null,          // backdrop of the app's "about this walk" card; null ⇒ system default
+    // Backdrop of the app's "about this walk" card:
+    //   "artist" ⇒ follow the artist's page colour, null ⇒ system default, "#rrggbb" ⇒ custom.
+    introColor: "artist",
+    // { lat, lng, heading } ⇒ transportable: players move and turn the walk onto the listener.
+    // null ⇒ the walk stays where it was drawn.
+    startAnchor: null,
     walkId: null,              // set if this document is a published walk the user owns (update vs new)
     center: [40.7128, -74.006],
     zoom: 15,
@@ -1247,7 +1252,8 @@
       name: state.name || "Untitled soundwalk",
       creator: state.creator || "",
       about: state.about || "",
-      introColor: state.introColor || null,
+      introColor: state.introColor ?? null,
+      startAnchor: state.startAnchor ? { ...state.startAnchor } : null,
       albumArt: state.albumArt ? state.albumArt.name : null,
       intro: state.introAudio || null,
       introGain: state.introGain,
@@ -1363,7 +1369,8 @@
       state.name = bundle.name || "";
       state.creator = (artistProfile && artistProfile.name) || bundle.creator || "";
       state.about = bundle.about || "";
-      state.introColor = bundle.introColor || null;
+      state.introColor = bundle.introColor ?? null;   // absent ⇒ system, as older bundles meant
+      state.startAnchor = bundle.startAnchor ? { ...bundle.startAnchor } : null;
       state.introAudio = (bundle.intro && audioStore.has(bundle.intro)) ? bundle.intro : null;
       state.introGain = bundle.introGain ?? 1.0;
       state.exitAudio = (bundle.exit && audioStore.has(bundle.exit)) ? bundle.exit : null;
@@ -1478,6 +1485,7 @@
     return JSON.stringify({
       name: state.name, creator: state.creator, about: state.about,
       introColor: state.introColor,
+      startAnchor: state.startAnchor ? { ...state.startAnchor } : null,
       albumArt: state.albumArt ? state.albumArt.name : null,
       intro: state.introAudio || null,
       introGain: state.introGain,
@@ -1505,7 +1513,8 @@
     state.name = snap.name || "";
     state.creator = snap.creator || "";
     state.about = snap.about || "";
-    state.introColor = snap.introColor || null;
+    state.introColor = snap.introColor ?? null;
+    state.startAnchor = snap.startAnchor ? { ...snap.startAnchor } : null;
     state.introAudio = (snap.intro && audioStore.has(snap.intro)) ? snap.intro : null;
     state.introGain = snap.introGain ?? 1.0;
     state.exitAudio = (snap.exit && audioStore.has(snap.exit)) ? snap.exit : null;
@@ -1521,6 +1530,70 @@
     applySelection();   // restore outline weights + editing handles for the selected shape
   }
   // Record a new history entry — call AFTER a change has been applied to state.
+  // ---- start anchor (transportable walks) --------------------------------------------------
+  let anchorMarker = null;
+
+  function anchorIcon(deg) {
+    return L.divIcon({
+      className: "anchor-pin",
+      html: `<div class="anchor-arrow" style="transform:rotate(${deg}deg)">` +
+            `<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">` +
+            `<path d="M12 2 L18.5 21 L12 16.5 L5.5 21 Z" fill="#1b2440" stroke="#fff" ` +
+            `stroke-width="1.6" stroke-linejoin="round"/></svg></div>`,
+      iconSize: [30, 30], iconAnchor: [15, 15],
+    });
+  }
+
+  /// Put the pin on the map (or take it off) to match state.startAnchor.
+  function syncAnchorLayer() {
+    const a = state.startAnchor;
+    if (!a) {
+      if (anchorMarker) { map.removeLayer(anchorMarker); anchorMarker = null; }
+      return;
+    }
+    if (!anchorMarker) {
+      anchorMarker = L.marker([a.lat, a.lng], {
+        draggable: true, icon: anchorIcon(a.heading), zIndexOffset: 1000,
+        title: "Where the listener starts",
+      }).addTo(map);
+      anchorMarker.on("dragend", () => {
+        const p = anchorMarker.getLatLng();
+        state.startAnchor = { ...state.startAnchor, lat: p.lat, lng: p.lng };
+        commit();
+      });
+    } else {
+      anchorMarker.setLatLng([a.lat, a.lng]);
+      anchorMarker.setIcon(anchorIcon(a.heading));
+    }
+  }
+
+  function syncAnchorInputs() {
+    const a = state.startAnchor;
+    $("mapAnchorOn").checked = !!a;
+    $("anchorHeadingRow").hidden = !a;
+    $("mapAnchorHeading").value = a ? a.heading : 0;
+    $("anchorHeadingVal").textContent = a ? `${Math.round(a.heading)}°` : "";
+    syncAnchorLayer();
+  }
+
+  $("mapAnchorOn").onchange = (e) => {
+    if (e.target.checked) {
+      const c = map.getCenter();
+      state.startAnchor = { lat: c.lat, lng: c.lng, heading: 0 };
+    } else {
+      state.startAnchor = null;
+    }
+    syncAnchorInputs();
+    commit();
+  };
+  $("mapAnchorHeading").oninput = (e) => {
+    if (!state.startAnchor) return;
+    state.startAnchor = { ...state.startAnchor, heading: Number(e.target.value) };
+    $("anchorHeadingVal").textContent = `${state.startAnchor.heading}°`;
+    syncAnchorLayer();
+  };
+  $("mapAnchorHeading").onchange = () => commit();
+
   function commit() {
     if (currentSnap === null) currentSnap = snapshot();
     const next = snapshot();
@@ -1555,15 +1628,21 @@
     $("tabAreas").hidden = !areas;
     $("tabDetails").hidden = areas;
   }
+  function introColorMode() {
+    if (state.introColor === "artist") return "artist";
+    return state.introColor ? "custom" : "system";
+  }
   function syncDetailsInputs() {
     $("mapName").value = state.name || "";
     $("mapCreator").value = state.creator || "";
     $("mapAbout").value = state.about || "";
     $("aboutCount").textContent = (state.about || "").length + " / 2000";
-    const auto = !state.introColor;
-    $("mapIntroColorAuto").checked = auto;
-    $("mapIntroColor").disabled = auto;
-    $("mapIntroColor").value = state.introColor || DEFAULT_INTRO_COLOR;
+    renderMarkdownInto($("aboutPreview"), state.about);
+    syncAnchorInputs();
+    const mode = introColorMode();
+    $("mapIntroColorMode").value = mode;
+    $("mapIntroColor").disabled = mode !== "custom";
+    $("mapIntroColor").value = mode === "custom" ? state.introColor : DEFAULT_INTRO_COLOR;
     $("dcUnplayed").value = dColor("unplayed");
     $("dcQueued").value = dColor("queued");
     $("dcPlaying").value = dColor("playing");
@@ -1609,12 +1688,18 @@
   $("mapName").onchange = () => commit();
   $("mapCreator").oninput = (e) => { state.creator = e.target.value; };
   $("mapCreator").onchange = () => commit();
-  $("mapAbout").oninput = (e) => { state.about = e.target.value; $("aboutCount").textContent = state.about.length + " / 2000"; };
+  $("mapAbout").oninput = (e) => {
+    state.about = e.target.value;
+    $("aboutCount").textContent = state.about.length + " / 2000";
+    renderMarkdownInto($("aboutPreview"), state.about);
+    syncAnchorInputs();
+  };
   $("mapAbout").onchange = () => commit();
-  $("mapIntroColorAuto").onchange = (e) => {
-    // Checked → publish no colour at all, so each player uses its own default.
-    state.introColor = e.target.checked ? null : $("mapIntroColor").value.toLowerCase();
-    $("mapIntroColor").disabled = e.target.checked;
+  $("mapIntroColorMode").onchange = (e) => {
+    state.introColor = e.target.value === "artist" ? "artist"
+                     : e.target.value === "custom" ? $("mapIntroColor").value.toLowerCase()
+                     : null;
+    $("mapIntroColor").disabled = e.target.value !== "custom";
     commit();
   };
   $("mapIntroColor").oninput = (e) => { state.introColor = e.target.value.toLowerCase(); };
@@ -1661,6 +1746,36 @@
   const closeMenu = () => { $("menu").hidden = true; };
   $("menuBtn").onclick = (e) => { e.stopPropagation(); if (!$("menuBtn").disabled) $("menu").hidden = !$("menu").hidden; };
   document.addEventListener("click", (e) => { if (!e.target.closest(".menu-wrap")) closeMenu(); });
+  /// Start a blank document. Mirrors importZip's wipe, then restores first-run defaults — the
+  /// creator stays the signed-in artist, and the intro card goes back to following their colours.
+  function newDocument() {
+    if (dirty && !confirm("Start a new soundwalk? Your unexported changes will be lost.")) return;
+    closeMenu();
+    state.shapes.forEach((s) => { engine.stopShape(s); if (s.layer) map.removeLayer(s.layer); });
+    state.shapes = []; state.selectedIds.clear(); state.walkId = null;
+    audioStore.forEach((r) => URL.revokeObjectURL(r.url));
+    audioStore.clear(); decoded.clear();
+    artStore.forEach((r) => URL.revokeObjectURL(r.url));
+    artStore.clear();
+    state.albumArt = null;
+
+    state.name = "";
+    state.creator = (artistProfile && artistProfile.name) || "";
+    state.about = "";
+    state.introColor = "artist";
+    state.startAnchor = null;
+    state.introAudio = null; state.introGain = 1.0;
+    state.exitAudio = null; state.exitGain = 1.0;
+    state.dialogueColors = { ...DEFAULT_DIALOGUE_COLORS };
+
+    updateAlbumArtUI();
+    syncDetailsInputs();
+    renderSide();
+    resetHistory();          // the blank document becomes the new undo baseline
+    toast("Started a new soundwalk.", "ok");
+  }
+
+  $("mNew").onclick = newDocument;
   $("mImport").onclick = () => { closeMenu(); $("importInput").click(); };
   $("mExport").onclick = () => { closeMenu(); exportZip(); };
   $("mWalks").onclick = () => { closeMenu(); openWalksModal(); };
@@ -1823,6 +1938,9 @@
   }
   function closePublishModal() { $("publishModal").hidden = true; }
 
+  // When the author ticked the rights box, kept for the record and sent with the publish.
+  let rightsConfirmedAt = null;
+
   function openPublishModal() {
     if (!idToken) { toast("Sign in with Google first.", "err"); return; }
     if (!publishReady) { toast("Publishing isn't configured yet.", "err"); return; }
@@ -1844,7 +1962,11 @@
     const owned = !!state.walkId;
     $("pubUpdate").hidden = !owned;
     $("pubGo").textContent = owned ? "☁ Publish as new" : "☁ Publish";
+    // With an update available, updating is the expected action — so it keeps the accent and
+    // "publish as new" steps back to a plain button.
+    $("pubGo").classList.toggle("publish", !owned);
     $("pubConfirm").checked = false;
+    rightsConfirmedAt = null;      // each publish needs its own attestation
     updatePubGo();
     $("publishModal").hidden = false;
   }
@@ -1873,7 +1995,8 @@
       label("Zipping… 0%");
       const { blob } = await buildBundleZip((p) => label(`Zipping… ${p}%`));
       const m = bundleMeta();
-      const meta = { name: m.name, creator: m.creator, about: m.about, center: m.center, zoom: m.zoom, shapeCount: m.shapes.length };
+      const meta = { name: m.name, creator: m.creator, about: m.about, center: m.center, zoom: m.zoom,
+                     shapeCount: m.shapes.length, rightsConfirmedAt };
       if (mode === "update") { meta.action = "update"; meta.walkId = state.walkId; }
       label("Requesting…");
       const r = await fetch(CFG.publishApiUrl, {
@@ -2015,10 +2138,27 @@
   const ARTIST_BG_DEFAULT = "#101014";
   let artistProfile = null;
 
-  function renderArtistPreview(src) {
+  function renderArtistPreview(src) { renderMarkdownInto($("artistPreview"), src); }
+
+  // Perceived luminance (BT.601), the same test the app uses to pick light or dark text.
+  function isDarkHex(hex) {
+    if (!/^#[0-9a-fA-F]{6}$/.test(hex || "")) return false;
+    const n = parseInt(hex.slice(1), 16);
+    return (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255 < 0.55;
+  }
+
+  /// Dress the bio preview in the artist's page colour so it previews the page itself. On "use
+  /// system colors" it falls back to the editor's own panel, matching the app's default background.
+  function applyArtistPreviewTheme() {
     const box = $("artistPreview");
+    const custom = !$("artistBgAuto").checked && /^#[0-9a-fA-F]{6}$/.test($("artistBg").value);
+    box.style.background = custom ? $("artistBg").value : "";
+    box.classList.toggle("on-dark", custom && isDarkHex($("artistBg").value));
+  }
+
+  function renderMarkdownInto(box, src) {
     const text = (src || "").trim();
-    if (!text) { box.innerHTML = `<p class="md-preview-empty">Your bio preview appears here.</p>`; return; }
+    if (!text) { box.innerHTML = `<p class="md-preview-empty">Preview appears here.</p>`; return; }
     // Sanitize even though it is the author's own text — the same markdown is rendered elsewhere.
     if (window.marked && window.DOMPurify) box.innerHTML = DOMPurify.sanitize(marked.parse(text, { breaks: true }));
     else box.textContent = text;                     // CDN blocked → readable fallback
@@ -2029,17 +2169,6 @@
     if (!p) return;
     artistProfile = p;
     if (p.name) { state.creator = p.name; $("mapCreator").value = p.name; }
-    // A brand-new document starts from the artist's own page colour (or stays on the system
-    // default if that is what they use). An imported or loaded walk keeps whatever it shipped with.
-    if (isUntouchedDocument()) {
-      state.introColor = p.bgColor || null;
-      syncDetailsInputs();
-    }
-  }
-
-  /// True for a fresh, never-edited document — nothing drawn, nothing imported, not a published walk.
-  function isUntouchedDocument() {
-    return !state.walkId && !dirty && state.shapes.length === 0;
   }
 
   /// `hex` null/blank ⇒ "use system colors": the swatch shows the fallback but is disabled, and
@@ -2066,6 +2195,7 @@
     setArtistBg(p.bgColor);
     updateArtistBioCount();
     renderArtistPreview($("artistBio").value);
+    applyArtistPreviewTheme();
     $("artistModal").hidden = false;
   }
 
@@ -2104,15 +2234,24 @@
   $("artistBgAuto").onchange = (e) => {
     $("artistBg").disabled = e.target.checked;
     $("artistBgHex").disabled = e.target.checked;
+    applyArtistPreviewTheme();
   };
-  $("artistBg").oninput = (e) => { $("artistBgHex").value = e.target.value.toLowerCase(); };
+  $("artistBg").oninput = (e) => {
+    $("artistBgHex").value = e.target.value.toLowerCase();
+    applyArtistPreviewTheme();
+  };
   $("artistBgHex").oninput = (e) => {
-    if (/^#[0-9a-fA-F]{6}$/.test(e.target.value)) $("artistBg").value = e.target.value.toLowerCase();
+    if (!/^#[0-9a-fA-F]{6}$/.test(e.target.value)) return;
+    $("artistBg").value = e.target.value.toLowerCase();
+    applyArtistPreviewTheme();
   };
 
   $("pubClose").onclick = closePublishModal;
   $("pubCancel").onclick = closePublishModal;
-  $("pubConfirm").onchange = updatePubGo;
+  $("pubConfirm").onchange = () => {
+    rightsConfirmedAt = $("pubConfirm").checked ? new Date().toISOString() : null;
+    updatePubGo();
+  };
   $("pubGo").onclick = () => runPublish("new");
   $("pubUpdate").onclick = () => runPublish("update");
   $("successClose").onclick = () => { $("successModal").hidden = true; };

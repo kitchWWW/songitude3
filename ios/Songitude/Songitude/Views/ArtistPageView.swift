@@ -15,13 +15,14 @@ struct ArtistPageView: View {
     /// nil when the artist left their page on the app's own colours.
     private var theme: (color: Color, isDark: Bool)? { HexColor.parse(profile?.bgColor) }
     private var walks: [RemoteWalk] { app.catalog.walks.filter { $0.artistId == artistId } }
+    @State private var showGeoLocked = true
+    @State private var showAnywhere = true
 
     var body: some View {
         List {
             Section {
                 VStack(alignment: .leading, spacing: 14) {
-                    // The artist's name is already the nav title and heads the walks section below.
-                    Text("Artist Bio").font(.largeTitle.bold())
+                    Text(name).font(.largeTitle.bold())
                     bio
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -32,14 +33,7 @@ struct ArtistPageView: View {
 
             if !walks.isEmpty {
                 Section {
-                    ForEach(walks) { w in
-                        // Same row as the browser, minus the artist link — we're already here.
-                        WalkRow(walk: w, onOpen: { onOpenWalk(w) })
-                            .uninstallSwipeAction(for: w, app: app)
-                            .fullWidthSeparator()
-                            .stableWalkRow(w, app: app)
-                            .listRowBackground(Color.clear)
-                    }
+                    EmptyView()
                 } header: {
                     // Reads as a heading in the page's own voice, not a grey system section label.
                     Text("Walks by \(name)")
@@ -47,6 +41,11 @@ struct ArtistPageView: View {
                         .foregroundStyle(.primary)
                         .textCase(nil)
                 }
+                .listRowBackground(Color.clear)
+
+                // Same split as the browser: fixed-in-place walks, then transportable ones.
+                artistSection("Geo-Locked", walks.filter { $0.portable != true }, isOpen: $showGeoLocked)
+                artistSection("Listen From Anywhere", walks.filter { $0.portable == true }, isOpen: $showAnywhere)
             }
         }
         .listStyle(.plain)
@@ -55,9 +54,30 @@ struct ArtistPageView: View {
         // With an authored backdrop, let every system colour (.secondary, separators, tints) adapt
         // to it; with none, inherit the app's appearance setting.
         .environment(\.colorScheme, theme.map { $0.isDark ? .dark : .light } ?? colorScheme)
-        .navigationTitle(name)
+        .navigationTitle("Artist Bio")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { app.artists.load(artistId) }
+    }
+
+    @ViewBuilder
+    private func artistSection(_ title: String, _ list: [RemoteWalk], isOpen: Binding<Bool>) -> some View {
+        if !list.isEmpty {
+            Section {
+                if isOpen.wrappedValue {
+                    ForEach(list) { w in
+                        // Same row as the browser, minus the artist link — we're already here.
+                        WalkRow(walk: w, onOpen: { onOpenWalk(w) })
+                            .uninstallSwipeAction(for: w, app: app)
+                            .fullWidthSeparator()
+                            .stableWalkRow(w, app: app)
+                            .listRowBackground(Color.clear)
+                    }
+                }
+            } header: {
+                CollapsibleHeader(title: title, isOpen: isOpen)
+                    .listRowBackground(Color.clear)
+            }
+        }
     }
 
     @ViewBuilder private var bio: some View {

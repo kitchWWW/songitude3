@@ -14,10 +14,20 @@ struct WalkIntroCard: View {
     let remote: RemoteWalk?               // catalog entry, when the walk came from the server
     let onArtist: (ArtistRoute) -> Void
     let onDismiss: () -> Void
+    let onRecenter: () -> Void
 
-    /// nil when the author left the colour on "use system color" — then the card looks like the
-    /// rest of the app and follows the appearance setting.
-    private var theme: (color: Color, isDark: Bool)? { HexColor.parse(experience.map.introColor) }
+    /// Resolves the walk's authored backdrop. "artist" follows the artist's page colour so a
+    /// rename of their palette reaches every walk of theirs; nil (or an artist with no colour of
+    /// their own) leaves the card looking like the rest of the app.
+    private var theme: (color: Color, isDark: Bool)? {
+        guard let raw = experience.map.introColor else { return nil }
+        if raw == Self.followArtist {
+            guard let id = remote?.artistId else { return nil }
+            return HexColor.parse(app.artists.profile(id)?.bgColor)
+        }
+        return HexColor.parse(raw)
+    }
+    static let followArtist = "artist"
     private var creator: String {
         let fromCatalog = remote?.creatorText ?? ""
         return fromCatalog.isEmpty ? (experience.map.creator ?? "") : fromCatalog
@@ -83,6 +93,12 @@ struct WalkIntroCard: View {
             .padding(.bottom, 150)   // leave the map's play button uncovered
         }
         .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        .onAppear {
+            // Following the artist needs their profile, which lives outside the bundle.
+            if experience.map.introColor == Self.followArtist, let id = remote?.artistId {
+                app.artists.load(id)
+            }
+        }
     }
 
     private var details: some View {
@@ -90,10 +106,23 @@ struct WalkIntroCard: View {
             if !creator.isEmpty { artistLine }
 
             if !about.isEmpty {
-                Text(about)
+                // Same markdown treatment as an artist bio: headings, lists, quotes, links.
+                MarkdownBody(source: about)
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // Only transportable walks can be re-placed, and only once the listener has seen the
+            // card before — the first read should just be the walk's own words.
+            if experience.map.startAnchor != nil && app.introShowings > 1 {
+                Button(action: onRecenter) {
+                    Label("Recenter here", systemImage: "location.circle")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                }
+                .buttonStyle(.bordered)
+                .padding(.top, 4)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

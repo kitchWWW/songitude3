@@ -10,6 +10,10 @@ struct ContentView: View {
     @State private var artistRoute: ArtistRoute?
     @State private var didAutoOpenBrowser = false
 
+    /// One height for every control in the top bar, so the title capsule lines up with the gear
+    /// and the layers button instead of being sized by its own text padding.
+    private static let topControl: CGFloat = 44
+
     var body: some View {
         ZStack(alignment: .top) {
             mapLayer.ignoresSafeArea()
@@ -18,7 +22,9 @@ struct ContentView: View {
             HStack(alignment: .top) {
                 Button { showSettings = true } label: {
                     Image(systemName: "gearshape.fill")
-                        .font(.title2).padding(12).background(.ultraThinMaterial, in: Circle())
+                        .font(.title2)
+                        .frame(width: Self.topControl, height: Self.topControl)
+                        .background(.ultraThinMaterial, in: Circle())
                 }
                 Spacer(minLength: 8)
                 // With a walk loaded the title reopens its card; with none it falls back to the
@@ -32,13 +38,16 @@ struct ContentView: View {
                         Image(systemName: app.selectedExperience != nil ? "info.circle" : "chevron.down")
                             .font(.caption2)
                     }
-                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .padding(.horizontal, 16)
+                    .frame(height: Self.topControl)
                     .background(.ultraThinMaterial, in: Capsule())
                 }
                 Spacer(minLength: 8)
                 Button { showBrowser = true } label: {
                     Image(systemName: "square.stack.3d.up.fill")
-                        .font(.title3).padding(12).background(.ultraThinMaterial, in: Circle())
+                        .font(.title3)
+                        .frame(width: Self.topControl, height: Self.topControl)
+                        .background(.ultraThinMaterial, in: Circle())
                 }
             }
             .padding(.horizontal, 16)
@@ -46,18 +55,26 @@ struct ContentView: View {
 
             VStack {
                 Spacer()
-                HStack(spacing: 16) {
+                // Play stays dead centre; "All done?" sits beside it rather than pushing it over,
+                // so the button you reach for never moves.
+                ZStack {
                     playButton
-                    if app.engine.isRunning && app.engine.canEndSession {
-                        Button { app.engine.endSession() } label: {
-                            Text("All done?")
-                                .font(.headline).foregroundStyle(.primary)
-                                .padding(.horizontal, 20).padding(.vertical, 16)
-                                .background(.ultraThinMaterial, in: Capsule())
+                    // Only offered when the walk actually has an outro to play.
+                    if app.engine.isRunning && app.engine.canEndSession && app.currentHasOutro {
+                        HStack {
+                            Spacer()
+                            Button { app.engine.endSession() } label: {
+                                Text("Play Outro")
+                                    .font(.headline).foregroundStyle(.primary)
+                                    .padding(.horizontal, 18).padding(.vertical, 14)
+                                    .background(.ultraThinMaterial, in: Capsule())
+                            }
                         }
+                        .padding(.trailing, 20)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
                 }
+                .frame(maxWidth: .infinity)
                 .animation(.easeInOut, value: app.engine.canEndSession)
                 .padding(.bottom, 28)
             }
@@ -65,13 +82,12 @@ struct ContentView: View {
             // its colour must not be dimmed by the overlay behind it.
             .zIndex(2)
 
-            if app.experiences.isEmpty && app.selectedExperience == nil { emptyOverlay }
-
             if app.showIntroCard, let exp = app.selectedExperience {
                 WalkIntroCard(experience: exp,
                               remote: app.currentRemoteWalk,
                               onArtist: { route in app.dismissIntroCard(); artistRoute = route },
-                              onDismiss: { app.dismissIntroCard() })
+                              onDismiss: { app.dismissIntroCard() },
+                              onRecenter: { app.recenterPortableWalk() })
                     .zIndex(1)
             }
         }
@@ -82,12 +98,21 @@ struct ContentView: View {
             // without picking anything doesn't immediately reopen it.
             // Even if they back out without choosing, we want the map on them.
             if app.selectedExperience == nil { app.location.requestOneShotFix() }
-            if app.selectedExperience == nil && !didAutoOpenBrowser {
+            // …but a QR deep link already names a walk, so don't cover it with the list.
+            if app.selectedExperience == nil && !app.isOpeningWalk && !didAutoOpenBrowser {
                 didAutoOpenBrowser = true
-                showBrowser = true
+                // Present it already-there rather than sliding it up: on launch this is the first
+                // screen, so an entrance animation reads as the app arriving twice.
+                var t = Transaction(); t.disablesAnimations = true
+                withTransaction(t) { showBrowser = true }
             }
         }
-        .fullScreenCover(isPresented: $showBrowser) { WalksBrowserView().environmentObject(app) }
+        .fullScreenCover(isPresented: $showBrowser) {
+            WalksBrowserView(onClose: { showBrowser = false }).environmentObject(app)
+        }
+        // A deep link can resolve after the list has already opened (the URL and onAppear race on a
+        // cold launch); get out of its way so the walk's card is what the listener sees.
+        .onChange(of: app.current?.id) { id in if id != nil { showBrowser = false } }
         .sheet(isPresented: $showSettings) { SettingsView().environmentObject(app) }
         .sheet(item: $artistRoute) { route in
             NavigationStack {
@@ -119,7 +144,9 @@ struct ContentView: View {
                            dialogueStates: app.engine.dialogueStates,
                            dialogueColors: exp.map.dialoguePalette,
                            centerOn: exp.map.centerCoord,
-                           experienceID: exp.id)
+                           // Placement is part of the identity: a re-anchored walk has the same id
+                           // but different coordinates, and the map keys its rebuild on this.
+                           experienceID: "\(exp.id)#\(app.placementVersion)")
         } else {
             // Nothing chosen yet: show a real map centred on the listener rather than a black slab.
             // The id carries the coordinate so the map re-centres once the first fix lands.
@@ -156,7 +183,7 @@ struct ContentView: View {
             .frame(width: 84, height: 84)
             .background(
                 // A flat opaque grey, not the translucent .secondary, so the map can't show through.
-                Circle().fill(downloading ? Color(red: 0.36, green: 0.38, blue: 0.42)
+                Circle().fill(downloading ? downloadingFill
                               : (app.engine.isRunning ? Color.red : Color.accentColor))
                     .shadow(radius: 12)
             )
@@ -172,20 +199,11 @@ struct ContentView: View {
                             : (app.engine.isRunning ? "Pause" : "Play"))
     }
 
-    private var emptyOverlay: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "square.stack.3d.up.slash")
-                .font(.largeTitle).foregroundStyle(.secondary)
-            Text("No experiences bundled")
-                .font(.headline)
-            Text("Export a .zip from the editor, drop it in Experiences/, and rebuild.")
-                .font(.footnote).foregroundStyle(.secondary)
-                .multilineTextAlignment(.center).padding(.horizontal, 40)
-        }
-        .padding(24)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-    }
 }
+
+/// Fill of the play button while a walk downloads. The progress ring's unfilled track uses the
+/// same colour so only the completed arc reads as a ring.
+private let downloadingFill = Color(red: 0.36, green: 0.38, blue: 0.42)
 
 /// The download indicator that wraps the play button: a determinate arc showing how much of the
 /// walk has arrived, on a slowly spinning track so it reads as active even on a stalled byte.
@@ -195,7 +213,7 @@ private struct DownloadHalo: View {
 
     var body: some View {
         ZStack {
-            Circle().stroke(.white.opacity(0.55), lineWidth: 6)
+            Circle().stroke(downloadingFill, lineWidth: 6)
             Circle()
                 .trim(from: 0, to: max(0.04, min(progress, 1)))
                 .stroke(.white, style: StrokeStyle(lineWidth: 6, lineCap: .round))

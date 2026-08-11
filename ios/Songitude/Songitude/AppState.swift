@@ -28,7 +28,9 @@ enum AppAppearance: String, CaseIterable, Identifiable {
 /// the render engine, and wires location fixes into playback.
 final class AppState: ObservableObject {
 
-    @Published var experiences: [Experience] = []       // bundled demos (offline fallback)
+    /// Walks baked into the app at build time. Normally empty — everything ships from the catalog
+    /// now — but `Experiences/*.zip` still works for trying a bundle without publishing it.
+    @Published var experiences: [Experience] = []
     @Published var current: Experience?                 // active walk (bundled or downloaded remote)
     @Published var offset: CoordinateOffset = .none
     @Published var hasOnboarded: Bool
@@ -37,6 +39,12 @@ final class AppState: ObservableObject {
     }
     @Published var showPermissionDeniedAlert = false
     @Published var showIntroCard = false
+    /// How many times the card has been opened for the walk that's loaded. The recenter control
+    /// only appears from the second viewing, so a first read is just the walk's own words.
+    @Published private(set) var introShowings = 0
+    /// Bumped every time a transportable walk is placed, so the map knows to redraw its overlays
+    /// even though the walk's id hasn't changed.
+    @Published private(set) var placementVersion = 0
     /// Which walks are on disk. Observable state rather than a filesystem probe inside `body`, so
     /// SwiftUI actually re-renders the row whose download just appeared or was removed.
     @Published private(set) var downloadedIds: Set<String> = []
@@ -55,6 +63,15 @@ final class AppState: ObservableObject {
     let artists = ArtistStore()
 
     private var pendingWalkId: String?                  // deep link to open after onboarding/catalog load
+    /// The walk the listener most recently asked for. A download that finishes after they have
+    /// moved on must not steer the UI — its files just land in the cache for next time.
+    private var activeWalkRequest: String?
+    /// The walk exactly as authored, before any transposition — re-anchoring has to start from
+    /// this, or each recenter would compound on the last one's transform.
+    private var authoredCurrent: Experience?
+    private var pendingRecenter = false
+    /// A portable walk placed before the compass reported gets one free re-place when it does.
+    private var pendingHeadingPlacement = false
     private var cancellables = Set<AnyCancellable>()
     private let onboardKey = "hasOnboarded.v1"
     private let appearanceKey = "appearance.v1"
@@ -68,7 +85,9 @@ final class AppState: ObservableObject {
     private var slewTimer: Timer?
 
     var selectedExperience: Experience? { current }
-    var currentIsBundled: Bool { current.map { c in experiences.contains { $0.id == c.id } } ?? false }
+    /// True while a specific walk is already on its way in — a deep link waiting on the catalog, or
+    /// one being opened right now. The map shouldn't pop the walks list over the top of it.
+    var isOpeningWalk: Bool { pendingWalkId != nil || activeWalkRequest != nil }
 
     init() {
         hasOnboarded = UserDefaults.standard.bool(forKey: onboardKey)
@@ -103,12 +122,27 @@ final class AppState: ObservableObject {
             .sink { [weak self] _ in self?.processPendingWalk() }.store(in: &cancellables)
         artists.objectWillChange.receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &cancellables)
+        location.$heading.compactMap { $0 }.receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self = self, self.pendingHeadingPlacement,
+                      let authored = self.authoredCurrent, authored.map.startAnchor != nil,
+                      self.location.lastKnownLocation != nil else { return }
+                self.pendingHeadingPlacement = false
+                self.applyPlacement(authored)
+            }.store(in: &cancellables)
         // Keep the catalog sorted nearest-first as fixes arrive (fixes only flow while playing,
         // so the list is correctly ordered the next time the browser is opened).
         location.$location.compactMap { $0 }.receive(on: RunLoop.main)
             .sink { [weak self] coord in
+                guard let self = self else { return }
                 var t = Transaction(); t.disablesAnimations = true
-                withTransaction(t) { self?.catalog.resort(near: coord) }
+                withTransaction(t) { self.catalog.resort(near: coord) }
+                // A recenter asked for a fresh fix; this is it.
+                if self.pendingRecenter, let authored = self.authoredCurrent,
+                   authored.map.startAnchor != nil {
+                    self.pendingRecenter = false
+                    self.applyPlacement(authored)
+                }
             }.store(in: &cancellables)
 
         if let c = current { engine.load(c) }
@@ -136,12 +170,63 @@ final class AppState: ObservableObject {
     // MARK: - Active experience
 
     func setCurrent(_ exp: Experience) {
-        current = exp
+        if current?.id != exp.id { introShowings = 0 }   // a different walk starts its own count
+        current = anchoredIfPortable(exp)
         offset = .none
         engine.load(exp)            // stops current playback
         engine.setOffset(.none)
         location.stop(); stopSlew() // switching pauses playback → release GPS + reset slewing
         maybeShowIntroCard()
+    }
+
+    /// A transportable walk (one that carries a `startAnchor`) is moved and turned onto the
+    /// listener the moment it opens, so the whole composition plays out from wherever they stand,
+    /// facing wherever they face. A walk with no anchor is returned untouched and stays fixed in
+    /// space. With no fix yet we leave it as authored rather than guess a position.
+    private func anchoredIfPortable(_ exp: Experience) -> Experience {
+        authoredCurrent = exp
+        guard let anchor = exp.map.startAnchor else { return exp }
+
+        // Always chase a fresh fix and heading for a portable walk: the cached one can be stale (or
+        // absent entirely on a cold launch), and placing the walk in the wrong city means nothing is
+        // ever in range and the walk plays silently. `pending…` re-places the moment they arrive.
+        pendingRecenter = true
+        if location.heading == nil { pendingHeadingPlacement = true }
+        location.requestOneShotFix()
+
+        guard let here = location.lastKnownLocation else { return exp }
+        let t = WalkTransposition(anchor: anchor, listener: here, heading: location.heading ?? anchor.heading)
+        return Experience(id: exp.id, directory: exp.directory, map: exp.map.transposed(t))
+    }
+
+    /// Whether the loaded walk ships an exit clip. Without one there is no outro to offer.
+    var currentHasOutro: Bool {
+        guard let exit = current?.map.exit else { return false }
+        return !exit.isEmpty
+    }
+
+    /// True when the loaded walk travels with the listener, so the UI can offer to re-place it.
+    var currentIsPortable: Bool { authoredCurrent?.map.startAnchor != nil }
+
+    /// Drop the walk around wherever the listener is standing now. Re-transposes from the authored
+    /// original and asks for a fresh fix; when that arrives it settles onto the better position.
+    func recenterPortableWalk() {
+        guard let authored = authoredCurrent, authored.map.startAnchor != nil else { return }
+        pendingRecenter = true
+        location.requestOneShotFix()
+        applyPlacement(authored)      // immediate, from the best position we already have
+    }
+
+    /// Re-place the walk around the listener. Deliberately not `setCurrent`: that reloads the
+    /// engine, which stops playback and resets dialogue history. Here only the coordinates change,
+    /// so the audio keeps running and simply re-evaluates against the new positions.
+    private func applyPlacement(_ authored: Experience) {
+        let placed = anchoredIfPortable(authored)
+        pendingRecenter = false
+        current = placed
+        placementVersion &+= 1
+        engine.updateGeometry(placed)
+        primeEngineWithCurrentLocation()   // re-trigger against the new geometry immediately
     }
 
     // MARK: - Intro card
@@ -160,6 +245,7 @@ final class AppState: ObservableObject {
     /// Tapping the walk's name in the top bar always brings the card back.
     func presentIntroCard() {
         guard current != nil else { return }
+        if !showIntroCard { introShowings += 1 }
         showIntroCard = true
         engine.cancelDoneTimer()      // the "All done?" delay shouldn't run behind the card
     }
@@ -180,17 +266,19 @@ final class AppState: ObservableObject {
         return catalog.walks.first { $0.id == id }
     }
 
-    func selectBundled(_ index: Int) {
-        guard experiences.indices.contains(index) else { return }
-        setCurrent(experiences[index])
-    }
-
     // MARK: - Remote walks
 
     func openRemote(_ walk: RemoteWalk) {
+        activeWalkRequest = walk.id
+        // Silence the walk they're leaving straight away. Without this the previous walk kept
+        // playing through the download of the new one, since nothing stops the engine until the
+        // new bundle finishes and setCurrent reloads it.
+        if current?.id != walk.id { engine.stop(); location.stop(); stopSlew() }
+
         // Only reuse the cache when it matches the published revision; otherwise fall through to
         // the downloader, which rewrites map.json and fetches anything missing.
         if WalkDownloader.isUpToDate(walk), let exp = WalkDownloader.cachedExperience(walk.id) {
+            downloadingWalkId = nil       // an earlier download keeps running, quietly, in the background
             setCurrent(exp)
             presentIntroCard()
             return
@@ -200,18 +288,24 @@ final class AppState: ObservableObject {
         WalkDownloader.download(
             walk,
             mapReady: { [weak self] map in
+                guard let self, self.activeWalkRequest == walk.id else { return }
                 // map.json is a few KB: recenter and retitle now rather than after the audio.
-                self?.showWalkShell(Experience(id: walk.id,
-                                               directory: WalkDownloader.cacheDir(for: walk.id),
-                                               map: map))
+                self.showWalkShell(Experience(id: walk.id,
+                                              directory: WalkDownloader.cacheDir(for: walk.id),
+                                              map: map))
             },
-            progress: { [weak self] p in self?.downloadProgress = p }
+            progress: { [weak self] p in
+                guard let self, self.activeWalkRequest == walk.id else { return }
+                self.downloadProgress = p
+            }
         ) { [weak self] result in
             guard let self = self else { return }
+            self.refreshDownloadedIds()          // the files landed either way
+            // Superseded: the listener has opened something else since. Leave their view alone.
+            guard self.activeWalkRequest == walk.id else { return }
             self.downloadingWalkId = nil
             switch result {
             case .success(let exp):
-                self.refreshDownloadedIds()
                 self.setCurrent(exp)                    // now the audio exists → load the engine
             case .failure(let e):
                 self.catalogError = "Download failed: \(e.localizedDescription)"
@@ -224,7 +318,8 @@ final class AppState: ObservableObject {
     /// Put a walk on screen before its audio exists: map, title and re-centering only. The engine
     /// is deliberately not loaded — there is nothing yet for it to play.
     private func showWalkShell(_ exp: Experience) {
-        current = exp
+        if current?.id != exp.id { introShowings = 0 }
+        current = anchoredIfPortable(exp)
         offset = .none
         engine.setOffset(.none)
         location.stop(); stopSlew()
@@ -239,6 +334,7 @@ final class AppState: ObservableObject {
     func deleteDownloaded(_ id: String) {
         WalkDownloader.deleteCache(id)
         let wasCurrent = current?.id == id
+        if activeWalkRequest == id { activeWalkRequest = nil }
 
         // Only the list-facing state changes here, with animations off.
         var t = Transaction(); t.disablesAnimations = true

@@ -19,14 +19,19 @@ bundle.zip
   "version": 1,
   "name": "How Fragile We Bloom",   // title; shown as the lock-screen "track" title
   "creator": "Chromic Duo",         // author/composer (optional)
-  "about": "A meditative walk …",   // description, up to 2000 chars (optional)
-  "introColor": "#101014",          // backdrop of the app's intro card (absent/null ⇒ the app's own
+  "about": "A meditative walk …",   // description, up to 2000 chars, Markdown (optional)
+  "introColor": "artist",           // intro-card backdrop: "artist" (follow the artist's page
+                                    //   colour), "#rrggbb" (custom), or absent/null (the app's own
                                     //   background, following its light/dark setting)
   "albumArt": "albumart.jpg",       // filename in the zip root, or null
   "intro": "intro.mp3",             // filename under audio/, or null — plays once when a walk begins
   "introGain": 1.0,                 // 0..1 playback level for the intro clip (absent ⇒ 1.0)
   "exit": "outro.mp3",              // filename under audio/, or null — plays when the listener ends the session
   "exitGain": 1.0,                  // 0..1 playback level for the exit clip (absent ⇒ 1.0)
+  // Present ⇒ a transportable walk: players move and turn the whole composition so this pin lands
+  // on the listener, facing the way they face. Absent ⇒ the walk is geo-locked where it was drawn.
+  "startAnchor": { "lat": 40.8988, "lng": -73.9109, "heading": 0 },
+
   "center": [40.8988, -73.9109],    // default map center [lat, lng] (author's view)
   "zoom": 16,
 
@@ -70,11 +75,18 @@ bundle.zip
 
 Opening a walk in the iOS app shows a card over the map with the walk's `name`, its `creator`
 (linked to the artist's page when the walk was published with an `artistId`) and its `about` text.
-`introColor` is the card's background, authored on the editor's **Details** tab. The editor's
-"Use system color" checkbox is on by default and writes **no colour at all** (`null`), which tells
-every reader to use its own background — in the iOS app that means the card matches the rest of the
-app and follows its Light/Dark/System setting. When a colour *is* authored, readers honour it and
-pick black or white text from its luminance, so any backdrop stays readable.
+`introColor` is the card's background, authored on the editor's **Details** tab, which offers three
+choices:
+
+| Editor choice | `introColor` | Reader behaviour |
+|---|---|---|
+| Use artist colors *(default)* | `"artist"` | Look up the walk's artist (`artistId` in the manifest) and use their page colour; if the artist uses system colours, so does the card. |
+| Use system colors | absent / `null` | The reader's own background, following its Light/Dark/System setting. |
+| Use custom color | `"#rrggbb"` | Exactly that colour. |
+
+When a colour resolves to an actual value, readers pick black or white text from its luminance, so
+any backdrop stays readable. Readers that predate `"artist"` treat the unknown string as no colour
+and fall back to their own background, which is the safe outcome.
 
 An artist's page colour (`bgColor` in `artists/<id>.json`) follows the same rule: absent ⇒ the app's
 own background.
@@ -85,6 +97,25 @@ or the ✕ in its top-left corner, and can be summoned again by tapping the walk
 
 The field is UI-only: it does not affect playback, and players that don't draw an intro card
 (the web player today) simply ignore it.
+
+### Transportable walks (`startAnchor`)
+
+A walk with no `startAnchor` is **geo-locked**: its areas sit at the coordinates they were drawn at.
+
+With one, the walk is **listen-from-anywhere**. `startAnchor` is `{ lat, lng, heading }`, authored by
+ticking "Start listener at a specific location" on the editor's Details tab and dragging the pin;
+`heading` is degrees clockwise from true north.
+
+When such a walk opens, the player reads the listener's position and compass heading once and
+applies a single rigid transform to every shape: translate so the anchor lands on the listener, then
+rotate by (listener heading − anchor heading). Radii and the distances and bearings between areas are
+untouched, so the composition plays exactly as written — just somewhere else, pointing somewhere
+else. The transform is computed once when the walk opens and then held for the session, so turning
+around doesn't spin the world.
+
+If no location fix is available the walk is left where it was authored rather than guessed at. The
+manifest exposes this as `portable`, which the apps use to split the catalog into "Geo-Locked" and
+"Listen From Anywhere".
 
 ### Playback modes (identical semantics in the web preview and the iOS app)
 

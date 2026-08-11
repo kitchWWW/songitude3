@@ -19,6 +19,9 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
     /// sort nearest-first) but is deliberately NOT forwarded to `onLocation` — opening a list must
     /// not drive the audio engine.
     private var oneShotOnly = false
+    /// Set while we want a single compass reading (to orient a transportable walk) without
+    /// leaving the magnetometer running.
+    private var oneShotHeading = false
 
     /// Called on every new fix so the owner can drive the audio engine.
     var onLocation: ((CLLocationCoordinate2D) -> Void)?
@@ -49,6 +52,10 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
         guard isAuthorized, !wantsUpdates else { return }
         oneShotOnly = true
         manager.requestLocation()
+        if CLLocationManager.headingAvailable() {
+            oneShotHeading = true
+            manager.startUpdatingHeading()
+        }
     }
 
     /// The big onboarding button calls this.
@@ -103,7 +110,14 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
-        DispatchQueue.main.async { self.heading = newHeading.trueHeading }
+        // trueHeading is -1 until the compass has calibrated; magneticHeading is the usable fallback.
+        let h = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
+        guard h >= 0 else { return }
+        DispatchQueue.main.async { self.heading = h }
+        if oneShotHeading && !wantsUpdates {
+            oneShotHeading = false
+            manager.stopUpdatingHeading()
+        }
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {

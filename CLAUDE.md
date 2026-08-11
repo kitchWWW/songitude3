@@ -57,7 +57,7 @@ all three** (and `FORMAT.md`).
   saved in the bundle.
 - `intro`/`exit` — walk-level clips (Details tab). Intro plays once at start, gated ~1 h per walk so
   it doesn't replay on resume. Exit is the "end session" sequence: fade dialogue (1 s) → exit clip →
-  fade everything (5 s) → stop. Apps trigger exit via an "All done?" button that appears 30 s after
+  fade everything (5 s) → stop. Apps trigger exit via a "Play Outro" button that appears 30 s after
   start; the editor's Listen tab has "Do intro"/"Do outro" buttons ("Do outro" returns to normal
   playback afterward instead of ending).
 

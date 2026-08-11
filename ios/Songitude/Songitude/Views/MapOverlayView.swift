@@ -29,14 +29,46 @@ struct MapOverlayView: UIViewRepresentable {
         if sig != c.signature {
             c.signature = sig
             rebuild(map, context: context)
-            let region = MKCoordinateRegion(center: offset.apply(centerOn),
-                                            span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01))
-            map.setRegion(region, animated: true)
+            map.setRegion(map.regionThatFits(openingRegion()), animated: true)
         }
         c.soundingIDs = soundingIDs
         c.dialogueStates = dialogueStates
         c.dialogueColors = dialogueColors
         c.applySounding()
+    }
+
+    /// Frame the whole walk on open. The bundle's `zoom` is the author's editing view and was
+    /// never carried into the app; a fixed span would crop a large walk and over-zoom a small one.
+    private func openingRegion() -> MKCoordinateRegion {
+        let fallback = MKCoordinateRegion(center: offset.apply(centerOn),
+                                          span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01))
+        var minLat = Double.infinity, maxLat = -Double.infinity
+        var minLng = Double.infinity, maxLng = -Double.infinity
+
+        func include(_ lat: Double, _ lng: Double) {
+            minLat = min(minLat, lat); maxLat = max(maxLat, lat)
+            minLng = min(minLng, lng); maxLng = max(maxLng, lng)
+        }
+        for shape in shapes {
+            if let c = shape.center, c.count == 2 {
+                // Grow a circle to its edges: one degree of latitude is ~111 km everywhere, and
+                // longitude shrinks with the cosine of the latitude.
+                let r = shape.radius ?? 0
+                let dLat = r / 111_000
+                let dLng = r / (111_000 * max(0.2, cos(c[0] * .pi / 180)))
+                include(c[0] - dLat, c[1] - dLng)
+                include(c[0] + dLat, c[1] + dLng)
+            }
+            for p in shape.points ?? [] where p.count == 2 { include(p[0], p[1]) }
+        }
+        guard minLat <= maxLat, minLng <= maxLng else { return fallback }
+
+        let center = offset.apply(CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2,
+                                                         longitude: (minLng + maxLng) / 2))
+        return MKCoordinateRegion(center: center,
+                                  span: MKCoordinateSpan(
+                                    latitudeDelta: max((maxLat - minLat) * 1.35, 0.004),
+                                    longitudeDelta: max((maxLng - minLng) * 1.35, 0.004)))
     }
 
     private func rebuild(_ map: MKMapView, context: Context) {

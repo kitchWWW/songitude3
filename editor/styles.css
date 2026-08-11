@@ -397,3 +397,17 @@ input[type="color"]:disabled { opacity: .4; cursor: default; }
   border-left: 3px solid var(--line); color: var(--muted); }
 .md-preview img { max-width: 100%; border-radius: 8px; }
 .md-preview-empty { color: var(--muted); font-style: italic; }
+/* The bio preview wears the artist's own page colour, so it previews the page, not just the text. */
+.md-preview.on-dark { color: #fff; }
+.md-preview.on-dark a { color: #8ab4ff; }
+.md-preview.on-dark code, .md-preview.on-dark pre { background: rgba(255,255,255,.14); }
+.md-preview.on-dark blockquote { border-left-color: rgba(255,255,255,.3); color: rgba(255,255,255,.75); }
+.md-preview.on-dark .md-preview-empty { color: rgba(255,255,255,.6); }
+/* The Details sidebar is narrow, so its About preview grows with the text instead of filling a pane. */
+.md-preview-inline { height: auto; min-height: 0; max-height: 220px; font-size: 13px; }
+
+/* Start-anchor pin: where a transportable walk begins, and which way it faces. */
+.anchor-pin { background: none; border: 0; }
+.anchor-arrow { width: 30px; height: 30px; display: grid; place-items: center;
+  filter: drop-shadow(0 1px 3px rgba(20,30,55,.45)); transform-origin: 50% 50%; }
+#anchorHeadingRow input[type="range"] { flex: 1; }

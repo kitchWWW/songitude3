@@ -61,15 +61,16 @@ async function rebuildManifest() {
       const meta = JSON.parse(await g.Body.transformToString());
       // The art filename only lives in the bundle, so read it from the unpacked map.json rather
       // than asking the editor to send it — that way already-published walks get thumbnails too.
-      let artUrl = null;
+      let artUrl = null, portable = false;
       try {
         const mj = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: `walks/${id}/map.json` }));
-        const art = JSON.parse(await mj.Body.transformToString()).albumArt;
-        if (art) artUrl = `${PUBLIC_BASE}/walks/${id}/${encodeURIComponent(art)}`;
-      } catch { /* no map.json yet, or no art — the app falls back to a placeholder */ }
+        const m = JSON.parse(await mj.Body.transformToString());
+        if (m.albumArt) artUrl = `${PUBLIC_BASE}/walks/${id}/${encodeURIComponent(m.albumArt)}`;
+        portable = !!m.startAnchor;   // "listen from anywhere" vs geo-locked
+      } catch { /* no map.json yet — the app falls back to a placeholder, geo-locked */ }
       items.push({
         id, name: meta.name, creator: meta.creator || "", about: meta.about || "",
-        artistId: meta.artistId || null, artUrl,
+        artistId: meta.artistId || null, artUrl, portable,
         center: meta.center, zoom: meta.zoom, shapeCount: meta.shapeCount, owner: meta.owner,
         updatedAt: meta.updatedAt || w.updatedAt, sizeBytes: w.size,
         base: `${PUBLIC_BASE}/walks/${id}`,

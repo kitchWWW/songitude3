@@ -137,6 +137,11 @@ async function writeMetaAndPresign(walkId, body, email) {
     zoom: Number(body.zoom) || 16,
     shapeCount: Number(body.shapeCount) || 0,
     owner: email, updatedAt: new Date().toISOString(),
+    // Rights attestation. The client stamp is when the author ticked the box; the server stamp is
+    // when we received it — a client clock can be wrong or set deliberately, so keep both.
+    rightsConfirmedAt: /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/.test(String(body.rightsConfirmedAt || ""))
+      ? String(body.rightsConfirmedAt) : null,
+    rightsConfirmedReceivedAt: body.rightsConfirmedAt ? new Date().toISOString() : null,
   };
   await s3.send(new PutObjectCommand({
     Bucket: BUCKET, Key: `walks/${walkId}/meta.json`, Body: JSON.stringify(meta), ContentType: "application/json",

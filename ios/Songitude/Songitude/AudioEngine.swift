@@ -165,6 +165,15 @@ final class RenderEngine: ObservableObject {
         updateNowPlayingStatic()
     }
 
+    /// Move the same areas to new coordinates without disturbing playback. Shape ids don't change,
+    /// so runtimes, decoded buffers and dialogue history all stay valid — only where each area sits
+    /// is different. Used when a transportable walk is re-anchored: `load` would stop the audio and
+    /// forget which dialogue had already played.
+    func updateGeometry(_ experience: Experience) {
+        self.experience = experience
+        self.shapes = experience.map.shapes
+    }
+
     func setOffset(_ offset: CoordinateOffset) { self.offset = offset }
 
     private static func loadBuffer(_ url: URL) -> AVAudioPCMBuffer? {

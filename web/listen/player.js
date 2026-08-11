@@ -12,7 +12,7 @@
   const DEFAULT_DIALOGUE_COLORS = { unplayed: "#8a63d2", queued: "#f5a623", playing: "#2ecc71", finished: "#ffffff" };
   const DIALOGUE_STATE_OPACITY = { unplayed: 0.2, queued: 0.42, playing: 0.6, finished: 0.08 };
   const INTRO_GATE_MS = 60 * 60 * 1000;   // don't replay a walk's intro within 1 hour (resume window)
-  const DONE_DELAY_MS = 30 * 1000;        // show the "All done?" button this long after play starts
+  const DONE_DELAY_MS = 30 * 1000;        // show the "Play Outro" button this long after play starts
 
   const $ = (id) => document.getElementById(id);
   const walksListEl = $("walksList");
@@ -391,11 +391,14 @@
     startSyncedIfReady();
     startWatch();
     acquireWake(); setMediaPlaying(true);
-    // Reset the end-session UI and arm the "All done?" button; play the intro (gated per walk).
+    // Reset the end-session UI and arm the "Play Outro" button; play the intro (gated per walk).
     outroActive = false;
     $("doneBtn").hidden = true; $("doneBtn").disabled = false;
     clearTimeout(doneTimer);
-    doneTimer = setTimeout(() => { if (running) $("doneBtn").hidden = false; }, DONE_DELAY_MS);
+    // Only offered when the walk actually ships an outro to play.
+    doneTimer = setTimeout(() => {
+      if (running && walk && walk.map && walk.map.exit) $("doneBtn").hidden = false;
+    }, DONE_DELAY_MS);
     maybePlayIntro();
     renderPlay(); setStatus("Listening — keep this page open and your screen on. 🎧");
   }
@@ -424,11 +427,23 @@
 
   // ---- catalog + walk loading ----
   function dist(w, here) { return (w.center && here) ? haversine(w.center, here) : Infinity; }
-  function fmtDist(m) { return m < 1000 ? Math.round(m) + " m" : (m / 1000).toFixed(1) + " km"; }
+  // Same scale as the iOS list: feet up close, miles beyond, whole miles once precision stops
+  // mattering. NEARBY_M matches the app's "close enough to go and hear right now" threshold.
+  const NEARBY_M = 2 * 1609.344;
+  function fmtDist(m) {
+    const miles = m / 1609.344;
+    if (miles < 0.1) return Math.round(m * 3.28084 / 10) * 10 + " ft";
+    if (miles < 10) return miles.toFixed(1) + " miles";
+    return Math.round(miles) + " miles";
+  }
   function loadCatalog() {
     walksListEl.innerHTML = "<p class='empty'>Loading…</p>";
     fetch(MANIFEST_URL, { cache: "no-store" }).then((r) => r.json())
-      .then((m) => { manifestWalks = m.walks || []; renderPicker(); })
+      .then((m) => {
+        manifestWalks = m.walks || [];
+        renderPicker();
+        window.dispatchEvent(new Event("songitude:catalog"));
+      })
       .catch((e) => { walksListEl.innerHTML = "<p class='empty'>Couldn't load: " + e.message + "</p>"; });
   }
   function renderPicker() {
@@ -441,10 +456,42 @@
     for (const w of list) {
       const row = document.createElement("button"); row.className = "walk-row";
       const d = here && w.center ? dist(w, here) : null;
-      row.innerHTML = `<div class="info"><h4></h4><div class="meta"></div></div><div class="go">›</div>`;
+      row.innerHTML = `<div class="art"></div><div class="info"><h4></h4>` +
+        `<div class="byline"></div><div class="meta"></div></div><div class="go">›</div>`;
+
+      const art = row.querySelector(".art");
+      if (w.artUrl) {
+        const img = document.createElement("img");
+        img.src = w.artUrl; img.alt = ""; img.loading = "lazy";
+        img.onerror = () => { art.classList.add("art-empty"); img.remove(); };
+        art.append(img);
+      } else art.classList.add("art-empty");
+
       row.querySelector("h4").textContent = w.name || w.id;
-      row.querySelector(".meta").textContent =
-        `${w.creator ? w.creator + " · " : ""}${d != null ? fmtDist(d) + " · " : ""}${w.shapeCount || 0} areas`;
+
+      const byline = row.querySelector(".byline");
+      if (w.creator) {
+        byline.append(document.createTextNode("by "));
+        if (w.artistId) {
+          const a = document.createElement("button");
+          a.className = "artist-link"; a.textContent = w.creator;
+          a.onclick = (e) => { e.stopPropagation(); openArtist(w.artistId, w.creator); };
+          byline.append(a);
+        } else {
+          const span = document.createElement("span"); span.textContent = w.creator;
+          byline.append(span);
+        }
+      } else byline.hidden = true;
+
+      const meta = row.querySelector(".meta");
+      if (d != null) {
+        const near = document.createElement("span");
+        near.textContent = fmtDist(d) + " away";
+        if (d < NEARBY_M) near.className = "near";
+        meta.append(near, document.createTextNode(" · "));
+      }
+      meta.append(document.createTextNode(`${w.shapeCount || 0} areas`));
+
       row.onclick = () => { closePicker(); loadWalk(w.id); };
       walksListEl.append(row);
     }
@@ -455,19 +502,223 @@
     const known = manifestWalks.find((x) => x.id === id);
     const base = known ? known.base : `${WALKS_BASE}/walks/${id}`;
     try {
-      const mapData = await (await fetch(`${base}/map.json`, { cache: "no-store" })).json();
+      let mapData = await (await fetch(`${base}/map.json`, { cache: "no-store" })).json();
+      if (mapData.startAnchor) {
+        setStatus("Placing this walk around you…");
+        const [here, heading] = await Promise.all([currentPosition(), readHeadingOnce()]);
+        if (here) mapData = transposeWalk(mapData, here, heading);
+        else toast("Couldn't read your location — showing this walk where it was authored.", "err");
+      }
       walk = { id, base, map: mapData };
       shapes = (mapData.shapes || []).map((s) => ({ ...s, _rt: null }));
       buffers.clear(); loadingFiles.clear(); syncedStarted = false;
       dialogueQueue = []; dialoguePlaying = null;
       drawShapes();
-      if (Array.isArray(mapData.center)) lmap.setView(mapData.center, mapData.zoom || 16);
+      fitToWalk(mapData);
       $("titleBtn").textContent = (mapData.name || "Soundwalk") + " ▾";
       setMediaMeta();
       $("playBtn").disabled = false;
       $("welcomeOverlay").hidden = true;
       setStatus("Ready — press play, then start walking.");
+      showIntroCard(mapData, known, false);
     } catch (e) { toast("Couldn't load that walk: " + e.message, "err"); }
+  }
+
+  // ---- markdown, artist profiles, intro card ------------------------------------------------
+  const ARTISTS_BASE = WALKS_BASE + "/artists";
+  const artistCache = new Map();
+  const INTRO_CARD_MS = 10 * 60 * 1000;   // don't re-show a walk's card within this window
+
+  function renderMd(box, src) {
+    const text = (src || "").trim();
+    if (!text) { box.innerHTML = ""; return; }
+    // Sanitize even though it is the author's own text — it arrives from a public bucket.
+    box.innerHTML = (window.marked && window.DOMPurify)
+      ? DOMPurify.sanitize(marked.parse(text, { breaks: true }))
+      : text.replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+  }
+
+  async function fetchArtist(id) {
+    if (artistCache.has(id)) return artistCache.get(id);
+    let p = null;
+    try {
+      const r = await fetch(`${ARTISTS_BASE}/${encodeURIComponent(id)}.json`, { cache: "no-store" });
+      if (r.ok) p = await r.json();
+    } catch (_) { /* no profile published yet */ }
+    artistCache.set(id, p);
+    return p;
+  }
+
+  // Perceived luminance (BT.601) decides whether an authored backdrop needs light text.
+  function isDarkHex(hex) {
+    if (!/^#[0-9a-f]{6}$/i.test(hex || "")) return false;
+    const n = parseInt(hex.slice(1), 16);
+    return (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255 < 0.55;
+  }
+  function themeSheet(el, hex) {
+    el.classList.toggle("themed", !!hex);
+    el.classList.toggle("on-dark", isDarkHex(hex));
+    el.style.background = hex || "";
+  }
+
+  /// The walk's backdrop: "artist" follows the artist's page colour, a hex is used as-is, and
+  /// anything else (absent) leaves the player's own sheet colour alone.
+  async function introBackdrop(mapData, known) {
+    const raw = mapData.introColor;
+    if (raw === "artist") {
+      if (!known || !known.artistId) return null;
+      const p = await fetchArtist(known.artistId);
+      return (p && p.bgColor) || null;
+    }
+    return /^#[0-9a-f]{6}$/i.test(raw || "") ? raw : null;
+  }
+
+  async function showIntroCard(mapData, known, force) {
+    const id = known ? known.id : (walk && walk.id);
+    const seenKey = "introCard.seen." + id;
+    if (!force) {
+      const last = Number(localStorage.getItem(seenKey) || 0);
+      if (last && Date.now() - last < INTRO_CARD_MS) return;
+    }
+    $("introTitle").textContent = mapData.name || "Soundwalk";
+    const by = $("introBy");
+    by.innerHTML = "";
+    const creator = (known && known.creator) || mapData.creator || "";
+    if (creator) {
+      by.append(document.createTextNode("by "));
+      if (known && known.artistId) {
+        const a = document.createElement("button");
+        a.className = "artist-link"; a.textContent = creator;
+        a.onclick = () => { closeIntro(); openArtist(known.artistId, creator); };
+        by.append(a);
+      } else by.append(document.createTextNode(creator));
+      by.hidden = false;
+    } else by.hidden = true;
+
+    renderMd($("introAbout"), (known && known.about) || mapData.about || "");
+    themeSheet($("introSheet"), await introBackdrop(mapData, known));
+    $("introOverlay").hidden = false;
+  }
+  function closeIntro() {
+    const id = walk && walk.id;
+    if (id) { try { localStorage.setItem("introCard.seen." + id, String(Date.now())); } catch (_) {} }
+    $("introOverlay").hidden = true;
+  }
+
+  async function openArtist(artistId, fallbackName) {
+    $("artistName").textContent = fallbackName || "Artist";
+    $("artistBio").innerHTML = "";
+    $("artistWalks").innerHTML = "";
+    $("artistWalksHead").hidden = true;
+    themeSheet($("artistSheet"), null);
+    $("artistOverlay").hidden = false;
+
+    const p = await fetchArtist(artistId);
+    if (p && p.name) $("artistName").textContent = p.name;
+    renderMd($("artistBio"), (p && p.bio) || "");
+    if (!(p && p.bio)) $("artistBio").innerHTML = "<p class='empty'>This artist hasn't written a bio yet.</p>";
+    themeSheet($("artistSheet"), (p && p.bgColor) || null);
+
+    const mine = manifestWalks.filter((w) => w.artistId === artistId);
+    if (mine.length) {
+      const head = $("artistWalksHead");
+      head.textContent = "Walks by " + ((p && p.name) || fallbackName || "this artist");
+      head.hidden = false;
+      const box = $("artistWalks");
+      for (const w of mine) {
+        const row = document.createElement("button"); row.className = "walk-row";
+        row.innerHTML = `<div class="art"></div><div class="info"><h4></h4><div class="meta"></div></div><div class="go">›</div>`;
+        const art = row.querySelector(".art");
+        if (w.artUrl) {
+          const img = document.createElement("img"); img.src = w.artUrl; img.alt = ""; img.loading = "lazy";
+          img.onerror = () => { art.classList.add("art-empty"); img.remove(); };
+          art.append(img);
+        } else art.classList.add("art-empty");
+        row.querySelector("h4").textContent = w.name || w.id;
+        row.querySelector(".meta").textContent = `${w.shapeCount || 0} areas`;
+        row.onclick = () => { $("artistOverlay").hidden = true; closePicker(); loadWalk(w.id); };
+        box.append(row);
+      }
+    }
+  }
+
+  // ---- transportable walks -------------------------------------------------------------------
+  // A walk carrying `startAnchor` is moved and turned so the anchor lands on the listener, facing
+  // the way they face. Distances and relative bearings are preserved, so it plays as composed.
+  const M_PER_DEG_LAT = 110540;
+  const mPerDegLng = (lat) => 111320 * Math.cos(lat * Math.PI / 180);
+
+  function transposeWalk(mapData, here, headingDeg) {
+    const a = mapData.startAnchor;
+    if (!a || !here) return mapData;
+    const turn = ((headingDeg || 0) - (a.heading || 0)) * Math.PI / 180;
+    const cs = Math.cos(turn), sn = Math.sin(turn);
+    const move = ([lat, lng]) => {
+      const east = (lng - a.lng) * mPerDegLng(a.lat);
+      const north = (lat - a.lat) * M_PER_DEG_LAT;
+      const e2 = east * cs + north * sn;
+      const n2 = north * cs - east * sn;
+      return [here[0] + n2 / M_PER_DEG_LAT, here[1] + e2 / mPerDegLng(here[0])];
+    };
+    const out = { ...mapData };
+    if (Array.isArray(mapData.center) && mapData.center.length === 2) out.center = move(mapData.center);
+    out.shapes = (mapData.shapes || []).map((sh) => {
+      const c = { ...sh };
+      if (Array.isArray(sh.center) && sh.center.length === 2) c.center = move(sh.center);
+      if (Array.isArray(sh.points)) c.points = sh.points.map(move);
+      return c;
+    });
+    return out;
+  }
+
+  /// One compass reading, if the browser will give us one. Resolves to null quickly otherwise —
+  /// without a heading we still place the walk, just without turning it.
+  function readHeadingOnce(timeoutMs = 1200) {
+    return new Promise((resolve) => {
+      if (typeof window.DeviceOrientationEvent === "undefined") return resolve(null);
+      let done = false;
+      const finish = (v) => {
+        if (done) return;
+        done = true;
+        window.removeEventListener("deviceorientationabsolute", onEvt);
+        window.removeEventListener("deviceorientation", onEvt);
+        resolve(v);
+      };
+      const onEvt = (e) => {
+        if (typeof e.webkitCompassHeading === "number") return finish(e.webkitCompassHeading);
+        if (e.absolute && typeof e.alpha === "number") return finish((360 - e.alpha) % 360);
+      };
+      window.addEventListener("deviceorientationabsolute", onEvt);
+      window.addEventListener("deviceorientation", onEvt);
+      setTimeout(() => finish(null), timeoutMs);
+    });
+  }
+
+  function currentPosition(timeoutMs = 6000) {
+    if (userCoord) return Promise.resolve(userCoord);
+    if (!navigator.geolocation) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (p) => resolve([p.coords.latitude, p.coords.longitude]),
+        () => resolve(null),
+        { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 30000 });
+    });
+  }
+
+  /// Frame the whole walk. map.json's `zoom` is the author's editing view, so it tends to crop a
+  /// large walk and over-zoom a small one; the shapes themselves are the better guide.
+  function fitToWalk(mapData) {
+    const pts = [];
+    for (const sh of mapData.shapes || []) {
+      if (Array.isArray(sh.center) && sh.center.length === 2) {
+        const r = sh.radius || 0;
+        const dLat = r / 111000, dLng = r / (111000 * Math.max(0.2, Math.cos(sh.center[0] * Math.PI / 180)));
+        pts.push([sh.center[0] - dLat, sh.center[1] - dLng], [sh.center[0] + dLat, sh.center[1] + dLng]);
+      }
+      for (const p of sh.points || []) if (p.length === 2) pts.push(p);
+    }
+    if (pts.length) lmap.fitBounds(L.latLngBounds(pts).pad(0.18), { maxZoom: 18 });
+    else if (Array.isArray(mapData.center)) lmap.setView(mapData.center, mapData.zoom || 16);
   }
 
   // ---- picker overlay ----
@@ -481,15 +732,31 @@
   function toast(msg, kind) { const t = $("toast"); t.textContent = msg; t.className = kind || ""; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 3500); }
 
   // ---- wiring ----
-  $("playBtn").onclick = toggle;
+  $("playBtn").onclick = () => { if (!$("introOverlay").hidden) closeIntro(); toggle(); };
   $("doneBtn").onclick = endSession;
   $("browseBtn").onclick = openPicker;
-  $("titleBtn").onclick = openPicker;
+  // The title reopens the current walk's card (as in the app); the browse button stays the only
+  // route to the full list.
+  $("titleBtn").onclick = () => {
+    if (walk) showIntroCard(walk.map, manifestWalks.find((x) => x.id === walk.id), true);
+    else openPicker();
+  };
   $("welcomeBrowse").onclick = openPicker;
   $("pickerClose").onclick = closePicker;
   $("pickerRefresh").onclick = loadCatalog;
+  $("introClose").onclick = closeIntro;
+  $("artistClose").onclick = () => { $("artistOverlay").hidden = true; };
+  // Pressing play dismisses the card, exactly like the app's play button.
+  $("introOverlay").onclick = (e) => { if (e.target === $("introOverlay")) closeIntro(); };
+  $("artistOverlay").onclick = (e) => { if (e.target === $("artistOverlay")) $("artistOverlay").hidden = true; };
 
   // ---- deep link ?walk=<id> ----
   const deepId = new URLSearchParams(location.search).get("walk");
   if (deepId) { $("welcomeOverlay").hidden = true; loadCatalog(); loadWalk(deepId); }
+  // The catalog carries creator/artistId/about; once it lands, refresh a card opened before it did.
+  window.addEventListener("songitude:catalog", () => {
+    if (walk && !$("introOverlay").hidden) {
+      showIntroCard(walk.map, manifestWalks.find((x) => x.id === walk.id), true);
+    }
+  });
 })();

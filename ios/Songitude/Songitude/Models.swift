@@ -60,6 +60,17 @@ struct DialogueColors: Codable {
     }
 }
 
+/// Where a transportable walk starts, and which way it faces there. When a bundle carries one, a
+/// player rigidly moves and rotates the whole walk so this pin lands on the listener, pointing the
+/// way they are pointing. Absent ⇒ the walk stays where it was authored.
+struct WalkAnchor: Codable {
+    let lat: Double
+    let lng: Double
+    let heading: Double          // degrees clockwise from true north
+
+    var coord: CLLocationCoordinate2D { CLLocationCoordinate2D(latitude: lat, longitude: lng) }
+}
+
 enum ShapeType: String, Codable {
     case circle
     case polygon
@@ -73,11 +84,11 @@ struct SoundShape: Codable, Identifiable {
     let color: String            // "#rrggbb"
 
     // circle
-    let center: [Double]?        // [lat, lng]
+    var center: [Double]?        // [lat, lng]
     let radius: Double?          // meters
 
     // polygon
-    let points: [[Double]]?      // [[lat, lng], ...]
+    var points: [[Double]]?      // [[lat, lng], ...]
 
     let audioFile: String?
     let mode: PlaybackMode
@@ -156,10 +167,11 @@ struct SoundMap: Codable {
     let introGain: Double?      // 0..1 level for the intro clip (absent ⇒ 1.0)
     let exit: String?           // audio/ filename played when the listener ends the session
     let exitGain: Double?       // 0..1 level for the exit clip (absent ⇒ 1.0)
-    let center: [Double]?
+    var center: [Double]?
     let zoom: Double?
     let dialogueColors: DialogueColors?
-    let shapes: [SoundShape]
+    let startAnchor: WalkAnchor?    // present ⇒ the walk is transportable; absent ⇒ fixed in space
+    var shapes: [SoundShape]
 
     var centerCoord: CLLocationCoordinate2D {
         if let c = center, c.count == 2 { return CLLocationCoordinate2D(latitude: c[0], longitude: c[1]) }

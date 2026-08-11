@@ -26,6 +26,7 @@
       <div class="menu-wrap">
         <button id="menuBtn" class="primary">☰ Menu ▾</button>
         <div id="menu" class="menu" hidden>
+          <button id="mNew">✦ New soundwalk</button>
           <button id="mImport">⇧ Import .zip</button>
           <button id="mExport">⇩ Export .zip</button>
           <button id="mWalks" hidden>🗂 My walks</button>
@@ -93,10 +94,11 @@
               <button type="button" id="creatorArtistLink" class="linkish">Artist details</button>.</span>
           </label>
           <label class="field">
-            <span class="field-label">About</span>
+            <span class="field-label">About <span class="field-note">(Markdown)</span></span>
             <textarea id="mapAbout" rows="6" maxlength="2000"
-              placeholder="Describe this soundwalk (up to 2000 characters)."></textarea>
+              placeholder="Describe this soundwalk (up to 2000 characters). **Bold**, _italic_, lists and [links](https://…) all work."></textarea>
             <span id="aboutCount" class="field-count">0 / 2000</span>
+            <div id="aboutPreview" class="md-preview md-preview-inline"></div>
           </label>
           <div class="field">
             <span class="field-label">Album art <span class="field-hint">— lock-screen artwork</span></span>
@@ -135,11 +137,14 @@
           <div class="field">
             <span class="field-label">Intro card background
               <span class="field-hint">— the colour of the card shown when a listener opens this walk</span></span>
-            <label class="check-row">
-              <input type="checkbox" id="mapIntroColorAuto" checked />
-              <span>Use system color</span>
-            </label>
-            <input id="mapIntroColor" type="color" value="#101014" />
+            <span class="color-row">
+              <select id="mapIntroColorMode">
+                <option value="artist">Use artist colors</option>
+                <option value="system">Use system colors</option>
+                <option value="custom">Use custom color</option>
+              </select>
+              <input id="mapIntroColor" type="color" value="#101014" />
+            </span>
           </div>
           <div class="field">
             <span class="field-label">Dialogue colors
@@ -150,6 +155,20 @@
               <label class="dcolor"><input type="color" id="dcPlaying" /><span>Playing</span></label>
               <label class="dcolor"><input type="color" id="dcFinished" /><span>Played</span></label>
             </div>
+          </div>
+          <div class="field">
+            <label class="check-row">
+              <input type="checkbox" id="mapAnchorOn" />
+              <span>Start listener at a specific location</span>
+            </label>
+            <span class="field-hint">Drag the pin on the map to set where the walk begins. When a
+              listener opens it, the whole walk moves and turns so the pin lands on them, facing the
+              way they face — so the same walk works anywhere. Leave off to keep it fixed in place.</span>
+            <span class="color-row" id="anchorHeadingRow" hidden>
+              <span class="field-label">Facing</span>
+              <input id="mapAnchorHeading" type="range" min="0" max="359" step="1" />
+              <span id="anchorHeadingVal" class="field-count"></span>
+            </span>
           </div>
         </div>
       </div>
@@ -190,8 +209,8 @@
       </div>
       <div class="modal-foot">
         <button id="pubCancel">Cancel</button>
-        <button id="pubUpdate" class="publish" hidden disabled>⟳ Update existing walk</button>
         <button id="pubGo" class="publish" disabled>☁ Publish</button>
+        <button id="pubUpdate" class="publish" hidden disabled>⟳ Update existing walk</button>
       </div>
     </div>
   </div>

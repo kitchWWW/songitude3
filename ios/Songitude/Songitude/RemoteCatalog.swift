@@ -14,6 +14,7 @@ struct RemoteWalk: Identifiable, Codable {
     let artistId: String?   // absent on walks published before artist pages existed
     let artUrl: String?     // album art, when the bundle shipped one
     let updatedAt: String?  // revision stamp; a cached copy older than this is stale
+    let portable: Bool?     // carries a startAnchor ⇒ "listen from anywhere"
     let base: String        // https://…/walks/<id>
     let mapUrl: String      // https://…/walks/<id>/map.json
 

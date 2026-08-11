@@ -18,6 +18,10 @@ struct SplashRootView: View {
 
     private let splashTileSize: CGFloat = 200
 
+    /// Everything after the opening hold runs this many times faster than its written timings.
+    private static let pace: Double = 1.5
+    private static func beat(_ seconds: Double) -> UInt64 { UInt64(seconds / pace * 1_000_000_000) }
+
     var body: some View {
         ZStack {
             Group {
@@ -104,13 +108,13 @@ struct SplashRootView: View {
 
         try? await Task.sleep(nanoseconds: 1_000_000_000)   // hold on the logo before it stirs
 
-        // ~3s for the whole outward pulse: three beats plus a beat to settle.
+        // The outward pulse: three beats plus a beat to settle, all scaled by `pace`.
         for step in 0..<3 {
-            withAnimation(.easeInOut(duration: 0.6)) { pulse = step }
-            try? await Task.sleep(nanoseconds: 700_000_000)
+            withAnimation(.easeInOut(duration: 0.6 / Self.pace)) { pulse = step }
+            try? await Task.sleep(nanoseconds: Self.beat(0.7))
         }
-        withAnimation(.easeInOut(duration: 0.6)) { pulse = -1 }
-        try? await Task.sleep(nanoseconds: 900_000_000)
+        withAnimation(.easeInOut(duration: 0.6 / Self.pace)) { pulse = -1 }
+        try? await Task.sleep(nanoseconds: Self.beat(0.9))
 
         // The onboarding logo publishes its frame as soon as it lays out, but don't fly until it
         // has — otherwise the tile animates to screen-centre and then snaps into place.
@@ -119,8 +123,8 @@ struct SplashRootView: View {
         }
 
         // Fully damped: overshooting the landing spot reads as a bounce, not a hand-off.
-        withAnimation(.spring(response: 0.85, dampingFraction: 1.0)) { phase = .flying }
-        try? await Task.sleep(nanoseconds: 950_000_000)
+        withAnimation(.spring(response: 0.85 / Self.pace, dampingFraction: 1.0)) { phase = .flying }
+        try? await Task.sleep(nanoseconds: Self.beat(0.95))
         phase = .done
         UserDefaults.standard.set(true, forKey: Self.seenKey)
     }

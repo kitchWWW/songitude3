@@ -22,7 +22,7 @@ struct SettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .alert("Reset app?", isPresented: $confirmReset) {
+            .alert("Reset App?", isPresented: $confirmReset) {
                 Button("Reset", role: .destructive) { app.resetEverything(); dismiss() }
                 Button("Cancel", role: .cancel) {}
             } message: {
@@ -87,7 +87,7 @@ struct SettingsView: View {
                 }
                 Button("Upgrade to “Always” location") { app.location.requestAlways() }
                 Button("Reload walk catalog") { app.refreshCatalog() }
-                Button("Reset app", role: .destructive) { confirmReset = true }
+                Button("Reset App", role: .destructive) { confirmReset = true }
             }
         }
     }
@@ -104,10 +104,11 @@ struct SettingsView: View {
     /// Name on the left, role on the right, and the whole row is the link.
     @ViewBuilder
     private func creditRow(name: String, role: String, url: String) -> some View {
+        // No explicit foregrounds: both halves inherit the Link's tint, so the row reads as one link.
         let row = HStack {
-            Text(name).foregroundStyle(.primary)
+            Text(name)
             Spacer(minLength: 12)
-            Text(role).foregroundStyle(.secondary)
+            Text(role)
         }
         .contentShape(Rectangle())
 
