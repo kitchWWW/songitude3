@@ -434,6 +434,7 @@ final class GrayTileOverlay: MKTileOverlay {
     /// Public by nature — it rides in every tile URL. Keep in step with the web's `CARTO_KEY`.
     static let apiKey = "cb1_2log_1_19551f9fb4c0fbe576aadb40"
 
+    private let dark: Bool
     private let session: URLSession
     private let ci = CIContext(options: [.useSoftwareRenderer: false])
     private let cache = TileCache(limit: 1500)
@@ -446,6 +447,7 @@ final class GrayTileOverlay: MKTileOverlay {
         // "API KEY REQUIRED" across every tile. It ships inside the app binary and is readable by
         // anyone who unpacks it, so treat it as public and restrict it by domain/bundle in the
         // CARTO dashboard rather than as a secret.
+        self.dark = dark
         let style = dark ? "dark_all" : "light_all"
         let cfg = URLSessionConfiguration.default
         cfg.urlCache = URLCache(memoryCapacity: 32 << 20, diskCapacity: 256 << 20, diskPath: "carto-tiles")
@@ -511,15 +513,27 @@ final class GrayTileOverlay: MKTileOverlay {
         }.resume()
     }
 
-    /// Saturation to zero, plus a touch of contrast: Positron is pale to begin with, and taking the
-    /// last of its colour out without this reads as mush rather than as a clean grey. The same
-    /// nudge is applied on the web in `.leaflet-tile-pane`.
+    /// Saturation to zero, and then opposite corrections for the two themes.
+    ///
+    /// Light (Positron) is pale to begin with, so a touch of extra contrast stops full desaturation
+    /// reading as mush — the same nudge the web applies in `.leaflet-tile-pane`.
+    ///
+    /// Dark (Dark Matter) is the other way round: it is already close to black, so draining its
+    /// colour *and* adding contrast crushed it into an unreadable slab — measured mean luminance 0.7
+    /// out of 255. It gets a gamma lift instead (see below), which brought that to 40 with three
+    /// times the detail variance: still a dark map, but a readable one.
     private func desaturate(_ data: Data) -> UIImage? {
         guard let src = CIImage(data: data) else { return nil }
-        let out = src.applyingFilter("CIColorControls", parameters: [
-            kCIInputSaturationKey: 0.0,
-            kCIInputContrastKey: 1.06,
-        ])
+        var out = src.applyingFilter("CIColorControls", parameters: dark
+            ? [kCIInputSaturationKey: 0.0]
+            : [kCIInputSaturationKey: 0.0, kCIInputContrastKey: 1.06])
+        if dark {
+            // Gamma rather than a brightness offset. Adding brightness raises every pixel equally,
+            // which lifts the near-black land but flattens it against the roads and labels — legible
+            // but washed out. A gamma below 1 lifts the shadows hardest and leaves the highlights
+            // alone, so the land stays dark while roads and labels separate from it.
+            out = out.applyingFilter("CIGammaAdjust", parameters: ["inputPower": 0.7])
+        }
         guard let cg = ci.createCGImage(out, from: out.extent) else { return nil }
         return UIImage(cgImage: cg)
     }
