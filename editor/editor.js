@@ -1801,6 +1801,11 @@
   function bundleMeta() {
     return {
       version: 1,
+      // Which published walk this document *is*, when it is one. Without it a re-imported bundle
+      // looks like a brand-new walk and publishing mints a second copy instead of updating the
+      // original. Absent (or someone else's) is handled: publish falls back to creating a new walk,
+      // and the server refuses an update to a walk you do not own.
+      walkId: state.walkId || null,
       name: state.name || "Untitled soundwalk",
       creator: state.creator || "",
       about: state.about || "",
@@ -1898,7 +1903,11 @@
       clearEditHandles();     // grips outlive their shape's layer otherwise
       state.routes.forEach(destroyRouteLayer);
       state.routes = []; state.selectedRouteId = null;
-      state.shapes = []; state.selectedIds.clear(); state.walkId = null;
+      // Carry the published id across the import, so re-opening an exported bundle still updates
+      // the walk it came from rather than publishing a duplicate. Bundles written before this
+      // field existed simply have none, which is the old behaviour.
+      state.shapes = []; state.selectedIds.clear();
+      state.walkId = typeof bundle.walkId === "string" && bundle.walkId ? bundle.walkId : null;
       audioStore.forEach((r) => URL.revokeObjectURL(r.url));
       audioStore.clear(); decoded.clear();
       artStore.forEach((r) => URL.revokeObjectURL(r.url));

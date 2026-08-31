@@ -56,6 +56,8 @@ aws iam put-role-policy --role-name "$ROLE" --policy-name inline --policy-docume
   \"Version\":\"2012-10-17\",\"Statement\":[
     {\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\",\"s3:PutObject\",\"s3:ListBucket\"],
      \"Resource\":[\"arn:aws:s3:::$BUCKET\",\"arn:aws:s3:::$BUCKET/*\"]},
+    {\"Effect\":\"Allow\",\"Action\":[\"s3:DeleteObject\"],
+     \"Resource\":[\"arn:aws:s3:::$BUCKET/walks/*/*\"]},
     {\"Effect\":\"Allow\",\"Action\":[\"ses:SendEmail\"],\"Resource\":\"*\"},
     {\"Effect\":\"Allow\",\"Action\":[\"logs:CreateLogGroup\",\"logs:CreateLogStream\",\"logs:PutLogEvents\"],
      \"Resource\":\"arn:aws:logs:*:*:*\"}]}"
@@ -118,10 +120,16 @@ aws lambda add-permission --function-name "$MANIFEST_FN" --statement-id s3invoke
   --source-arn "arn:aws:s3:::$BUCKET" >/dev/null 2>&1 || true
 MANIFEST_ARN="$(aws lambda get-function --function-name "$MANIFEST_FN" --query Configuration.FunctionArn --output text)"
 
-echo "==> S3 trigger: walks/*/bundle.zip -> manifest"
+# Versioning is what makes the delete grant above safe: `s3:DeleteObject` on a versioned bucket
+# only writes a delete marker, and `s3:DeleteObjectVersion` is deliberately NOT granted, so nothing
+# this role can do actually destroys bytes. Never remove one without removing the other.
+echo "==> Bucket versioning (deletes stay recoverable)"
+aws s3api put-bucket-versioning --bucket "$BUCKET" --versioning-configuration Status=Enabled
+
+echo "==> S3 trigger: walks/*/bundle.zip -> manifest (create AND remove)"
 aws s3api put-bucket-notification-configuration --bucket "$BUCKET" --notification-configuration "{
   \"LambdaFunctionConfigurations\":[{
-    \"LambdaFunctionArn\":\"$MANIFEST_ARN\",\"Events\":[\"s3:ObjectCreated:*\"],
+    \"LambdaFunctionArn\":\"$MANIFEST_ARN\",\"Events\":[\"s3:ObjectCreated:*\",\"s3:ObjectRemoved:*\"],
     \"Filter\":{\"Key\":{\"FilterRules\":[{\"Name\":\"suffix\",\"Value\":\"bundle.zip\"}]}}}]}"
 
 echo

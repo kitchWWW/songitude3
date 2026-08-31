@@ -47,6 +47,9 @@ bundle.zip
   // How sound areas are drawn for listeners (optional; absent ⇒ "classic").
   "displayStyle": "classic",        // "classic" | "fuzzy"
 
+  // Which published walk this bundle *is* (optional; absent ⇒ not published / unknown).
+  "walkId": "garden-of-memories-7cf9a10a",
+
   "shapes": [
     {
       "id": "s_ab12cd",
@@ -183,6 +186,22 @@ center (`r` = distance / radius, 0 at center → 1 at edge):
   the edge.
 
 Ignored for polygons and for `oneshot`/`dialogue` circles.
+
+### Published id (`walkId`)
+
+Optional walk-level string. Absent — which is every bundle written before this field, and every
+bundle exported from a document that has never been published — means the editor treats the walk as
+new on its next publish. That was the only behaviour before, and it is why re-importing an exported
+bundle used to publish a *second* copy of a walk instead of updating the original: the editor had no
+way to tell that the file it just opened was a walk it already owned.
+
+Only the editor reads it. Players ignore it entirely — it says nothing about how a walk sounds or
+looks, and the app and web player never look at it.
+
+It is a **hint, not an authorisation**. A bundle can be passed to anyone, so the id in it may name a
+walk the person publishing does not own. The server is what decides: an `update` is accepted only
+when the walk's `meta.json` `owner` matches the signed-in account, and refused with 403 otherwise —
+at which point the author can publish it as a new walk instead.
 
 ### Solo (`solo`)
 
