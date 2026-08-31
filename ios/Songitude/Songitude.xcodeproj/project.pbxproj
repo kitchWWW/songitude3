@@ -25,6 +25,8 @@
 		1A000000000000000000081F /* WalkIntroCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000071F /* WalkIntroCard.swift */; };
 		1A0000000000000000000820 /* SongitudeMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000720 /* SongitudeMark.swift */; };
 		1A0000000000000000000821 /* SplashRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000721 /* SplashRootView.swift */; };
+		1A0000000000000000000822 /* ReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000722 /* ReportView.swift */; };
+		1A0000000000000000000823 /* FarAwayCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000723 /* FarAwayCard.swift */; };
 		1A0000000000000000000902 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000702 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -50,6 +52,8 @@
 		1A000000000000000000071F /* WalkIntroCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalkIntroCard.swift; sourceTree = "<group>"; };
 		1A0000000000000000000720 /* SongitudeMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongitudeMark.swift; sourceTree = "<group>"; };
 		1A0000000000000000000721 /* SplashRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashRootView.swift; sourceTree = "<group>"; };
+		1A0000000000000000000722 /* ReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportView.swift; sourceTree = "<group>"; };
+		1A0000000000000000000723 /* FarAwayCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarAwayCard.swift; sourceTree = "<group>"; };
 		1A0000000000000000000703 /* Songitude.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Songitude.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -107,6 +111,8 @@
 				1A0000000000000000000719 /* OnboardingView.swift */,
 				1A000000000000000000071A /* SettingsView.swift */,
 				1A000000000000000000071C /* WalksBrowserView.swift */,
+				1A0000000000000000000722 /* ReportView.swift */,
+				1A0000000000000000000723 /* FarAwayCard.swift */,
 				1A0000000000000000000721 /* SplashRootView.swift */,
 				1A0000000000000000000720 /* SongitudeMark.swift */,
 				1A000000000000000000071F /* WalkIntroCard.swift */,
@@ -221,6 +227,8 @@
 				1A000000000000000000081A /* SettingsView.swift in Sources */,
 				1A000000000000000000081B /* RemoteCatalog.swift in Sources */,
 				1A000000000000000000081C /* WalksBrowserView.swift in Sources */,
+				1A0000000000000000000822 /* ReportView.swift in Sources */,
+				1A0000000000000000000823 /* FarAwayCard.swift in Sources */,
 				1A0000000000000000000821 /* SplashRootView.swift in Sources */,
 				1A0000000000000000000820 /* SongitudeMark.swift in Sources */,
 				1A000000000000000000081F /* WalkIntroCard.swift in Sources */,
@@ -286,7 +294,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 6VXP2ZNFJU;
 				ENABLE_PREVIEWS = YES;
 				CODE_SIGN_ENTITLEMENTS = Songitude/Songitude.entitlements;
@@ -301,7 +309,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = "1";
 			};
 			name = Debug;
 		};
@@ -311,7 +319,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 6VXP2ZNFJU;
 				ENABLE_PREVIEWS = YES;
 				CODE_SIGN_ENTITLEMENTS = Songitude/Songitude.entitlements;
@@ -326,7 +334,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = "1";
 			};
 			name = Release;
 		};

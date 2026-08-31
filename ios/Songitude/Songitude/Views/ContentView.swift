@@ -5,6 +5,9 @@ import CoreLocation
 /// top-left, and a big play/pause at the bottom that toggles the whole rendering engine.
 struct ContentView: View {
     @EnvironmentObject var app: AppState
+    /// The effective scheme (SplashRootView applies the walk's `appearance` above us). The map
+    /// supplies its own tiles now, so it has to be told which basemap to draw.
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showSettings = false
     @State private var showBrowser = false
     @State private var artistRoute: ArtistRoute?
@@ -55,23 +58,24 @@ struct ContentView: View {
 
             VStack {
                 Spacer()
-                // Play stays dead centre; "All done?" sits beside it rather than pushing it over,
-                // so the button you reach for never moves.
-                ZStack {
-                    playButton
+                // Play stays dead centre with a skip button either side of it, and "All done?"
+                // above rather than beside — so the button you reach for never moves, and nothing
+                // lands on top of the skips.
+                VStack(spacing: 14) {
                     // Only offered when the walk actually has an outro to play.
                     if app.engine.isRunning && app.engine.canEndSession && app.currentHasOutro {
-                        HStack {
-                            Spacer()
-                            Button { app.engine.endSession() } label: {
-                                Text("Play Outro")
-                                    .font(.headline).foregroundStyle(.primary)
-                                    .padding(.horizontal, 18).padding(.vertical, 14)
-                                    .background(.ultraThinMaterial, in: Capsule())
-                            }
+                        Button { app.engine.endSession() } label: {
+                            Text("Play Outro")
+                                .font(.headline).foregroundStyle(.primary)
+                                .padding(.horizontal, 18).padding(.vertical, 14)
+                                .background(.ultraThinMaterial, in: Capsule())
                         }
-                        .padding(.trailing, 20)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                    HStack(spacing: 20) {
+                        skipButton(by: -RenderEngine.skipInterval)
+                        playButton
+                        skipButton(by: RenderEngine.skipInterval)
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -90,8 +94,18 @@ struct ContentView: View {
                               onRecenter: { app.recenterPortableWalk() })
                     .zIndex(1)
             }
+
+            // Follows the intro card, never shares the screen with it.
+            if app.showFarAwayCard, !app.showIntroCard, let exp = app.selectedExperience {
+                FarAwayCard(walkName: exp.displayName,
+                            distanceMiles: app.currentWalkDistanceMiles,
+                            onBrowse: { app.dismissFarAwayCard(); showBrowser = true },
+                            onDismiss: { app.dismissFarAwayCard() })
+                    .zIndex(1)
+            }
         }
         .animation(.easeInOut(duration: 0.2), value: app.showIntroCard)
+        .animation(.easeInOut(duration: 0.2), value: app.showFarAwayCard)
         .onAppear {
             app.maybeShowIntroCard()
             // Nothing loaded yet → go straight to the selector. Guarded so closing the browser
@@ -139,6 +153,7 @@ struct ContentView: View {
     @ViewBuilder private var mapLayer: some View {
         if let exp = app.selectedExperience {
             MapOverlayView(shapes: exp.map.shapes,
+                           routes: exp.map.drawableRoutes,
                            offset: app.offset,
                            soundingIDs: app.engine.soundingShapeIDs,
                            dialogueStates: app.engine.dialogueStates,
@@ -146,19 +161,24 @@ struct ContentView: View {
                            centerOn: exp.map.centerCoord,
                            // Placement is part of the identity: a re-anchored walk has the same id
                            // but different coordinates, and the map keys its rebuild on this.
-                           experienceID: "\(exp.id)#\(app.placementVersion)")
+                           experienceID: "\(exp.id)#\(app.placementVersion)",
+                           fuzzy: exp.map.isFuzzy,
+                           dark: colorScheme == .dark)
         } else {
             // Nothing chosen yet: show a real map centred on the listener rather than a black slab.
             // The id carries the coordinate so the map re-centres once the first fix lands.
             let here = app.location.lastKnownLocation
             MapOverlayView(shapes: [],
+                           routes: [],
                            offset: .none,
                            soundingIDs: [],
                            dialogueStates: [:],
                            dialogueColors: DialogueColors(),
                            centerOn: here ?? CLLocationCoordinate2D(latitude: 39.5, longitude: -98.35),
                            experienceID: here.map { String(format: "none@%.4f,%.4f", $0.latitude, $0.longitude) }
-                                             ?? "none")
+                                             ?? "none",
+                           fuzzy: false,
+                           dark: colorScheme == .dark)
         }
     }
 
@@ -183,8 +203,7 @@ struct ContentView: View {
             .frame(width: 84, height: 84)
             .background(
                 // A flat opaque grey, not the translucent .secondary, so the map can't show through.
-                Circle().fill(downloading ? downloadingFill
-                              : (app.engine.isRunning ? Color.red : Color.accentColor))
+                Circle().fill(downloading ? downloadingFill : Color.accentColor)
                     .shadow(radius: 12)
             )
             .overlay {
@@ -197,6 +216,24 @@ struct ContentView: View {
         .accessibilityLabel(downloading
                             ? "Downloading, \(Int(app.downloadProgress * 100)) percent"
                             : (app.engine.isRunning ? "Pause" : "Play"))
+    }
+
+    /// Back / forward 15 seconds. Smaller than play, and always present rather than appearing with
+    /// playback: holding their place either side keeps the play button from moving under the thumb.
+    /// With nothing playing they simply go quiet.
+    private func skipButton(by delta: TimeInterval) -> some View {
+        let back = delta < 0
+        let live = app.engine.isRunning
+        return Button { app.engine.skip(by: delta) } label: {
+            Image(systemName: back ? "gobackward.15" : "goforward.15")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 56, height: 56)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .opacity(live ? 1 : 0.35)
+        .allowsHitTesting(live)
+        .accessibilityLabel(back ? "Back 15 seconds" : "Forward 15 seconds")
     }
 
 }

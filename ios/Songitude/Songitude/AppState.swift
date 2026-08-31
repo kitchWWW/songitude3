@@ -39,6 +39,9 @@ final class AppState: ObservableObject {
     }
     @Published var showPermissionDeniedAlert = false
     @Published var showIntroCard = false
+    /// Follows the intro card when the listener is nowhere near a geo-locked walk. Advisory only —
+    /// they can dismiss it and look around regardless.
+    @Published var showFarAwayCard = false
     /// How many times the card has been opened for the walk that's loaded. The recenter control
     /// only appears from the second viewing, so a first read is just the walk's own words.
     @Published private(set) var introShowings = 0
@@ -78,6 +81,10 @@ final class AppState: ObservableObject {
     /// How long an intro card stays "already seen" for a walk. Deliberately loose: moving around
     /// the app shouldn't re-show it, but coming back later should.
     private let introWindow: TimeInterval = 600
+    /// Far enough that none of a fixed walk can be reached on foot — 50 miles.
+    private let farAwayDistance: CLLocationDistance = 80_467
+    /// Set while a fix is outstanding purely to decide whether the far-away card is warranted.
+    private var pendingFarAwayCheck = false
 
     // GPS slewing: feed the engine a virtual position that eases toward each new fix in small steps,
     // so a jumpy GPS reading can't teleport across (and skip) a zone.
@@ -99,14 +106,15 @@ final class AppState: ObservableObject {
         current = nil
 
         location.onLocation = { [weak self] coord in self?.ingestFix(coord) }
+        // Always invoked on the main thread by the engine, and inside a background task assertion
+        // when it came from the lock screen — so do the work here and now rather than hopping to a
+        // later turn, where the app may already have been suspended part-way through the teardown.
         engine.remoteToggle = { [weak self] play in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                if play {
-                    self.location.start(); self.engine.start(); self.primeEngineWithCurrentLocation()
-                } else {
-                    self.engine.stop(); self.location.stop(); self.stopSlew()
-                }
+            guard let self = self else { return }
+            if play {
+                self.location.start(); self.engine.start(); self.primeEngineWithCurrentLocation()
+            } else {
+                self.engine.stop(); self.location.stop(); self.stopSlew()
             }
         }
         engine.objectWillChange.receive(on: RunLoop.main)
@@ -143,6 +151,9 @@ final class AppState: ObservableObject {
                     self.pendingRecenter = false
                     self.applyPlacement(authored)
                 }
+                // The far-away check was waiting on a position to compare against. It clears its
+                // own flag once it can actually answer.
+                if self.pendingFarAwayCheck { self.maybeShowFarAwayCard() }
             }.store(in: &cancellables)
 
         if let c = current { engine.load(c) }
@@ -170,13 +181,25 @@ final class AppState: ObservableObject {
     // MARK: - Active experience
 
     func setCurrent(_ exp: Experience) {
-        if current?.id != exp.id { introShowings = 0 }   // a different walk starts its own count
+        // A finished download re-enters this for a walk that is *already* on screen — the shell was
+        // put up as soon as map.json landed. That is not the listener choosing a different walk, and
+        // it must not retract a card they are in the middle of reading: clearing state here
+        // unconditionally is what made the far-away warning flash up and vanish mid-load.
+        let switchingWalk = current?.id != exp.id
+        if switchingWalk {
+            introShowings = 0        // a different walk starts its own count
+            showFarAwayCard = false
+        }
         current = anchoredIfPortable(exp)
         offset = .none
         engine.load(exp)            // stops current playback
         engine.setOffset(.none)
         location.stop(); stopSlew() // switching pauses playback → release GPS + reset slewing
         maybeShowIntroCard()
+        // Decide the far-away card only when nothing is already up. If the shell already showed it,
+        // it stays; if it was dismissed, its own gate keeps it down; if the check was skipped
+        // earlier for want of a fix, this is a fresh chance to make the call.
+        if !showIntroCard && !showFarAwayCard { maybeShowFarAwayCard() }
     }
 
     /// A transportable walk (one that carries a `startAnchor`) is moved and turned onto the
@@ -257,6 +280,55 @@ final class AppState: ObservableObject {
         showIntroCard = false
         // Start (or restart) the countdown now that the map is visible.
         if engine.isRunning { engine.armDoneTimer() }
+        maybeShowFarAwayCard()
+    }
+
+    // MARK: - "You look pretty far away" card
+
+    private func farAwayKey(_ id: String) -> String { "farAwayCard.seen.\(id)" }
+
+    /// How far the listener is from the loaded walk, in miles — nil without a walk or a fix.
+    var currentWalkDistanceMiles: Double? {
+        guard let exp = current, let here = location.location ?? location.lastKnownLocation else { return nil }
+        return GeoUtils.distance(here, exp.map.centerCoord) / 1609.344
+    }
+
+    /// Once the walk's own card is out of the way, tell a listener who is nowhere near it that they
+    /// won't hear anything from here. Deliberately advisory: it never blocks opening the walk.
+    ///
+    /// A transportable walk is exempt — it re-anchors onto wherever the listener is standing, so its
+    /// distance from where it was authored says nothing about whether they can hear it.
+    ///
+    /// `pendingFarAwayCheck` is cleared exactly when a decision is reached, so an answer can't be
+    /// lost to whatever else is in flight — a fix arriving while the walk's own card is still up
+    /// holds the question rather than consuming it.
+    func maybeShowFarAwayCard() {
+        guard let exp = current, !currentIsPortable else { pendingFarAwayCheck = false; return }
+        guard !showIntroCard else { return }        // hold; dismissing that card asks again
+        let last = UserDefaults.standard.double(forKey: farAwayKey(exp.id))
+        if last > 0, Date().timeIntervalSince1970 - last < introWindow {
+            pendingFarAwayCheck = false
+            return
+        }
+        guard let here = location.location ?? location.lastKnownLocation else {
+            // No position yet: ask for one and decide when it lands, rather than warning on a guess.
+            pendingFarAwayCheck = true
+            location.requestOneShotFix()
+            return
+        }
+        pendingFarAwayCheck = false
+        guard GeoUtils.distance(here, exp.map.centerCoord) > farAwayDistance else { return }
+        showFarAwayCard = true
+        engine.cancelDoneTimer()      // the "All done?" delay shouldn't run behind the card
+    }
+
+    func dismissFarAwayCard() {
+        pendingFarAwayCheck = false
+        if let id = current?.id {
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: farAwayKey(id))
+        }
+        showFarAwayCard = false
+        if engine.isRunning { engine.armDoneTimer() }
     }
 
     /// The catalog entry for the active walk, when it came from the server — carries the artistId
@@ -318,7 +390,7 @@ final class AppState: ObservableObject {
     /// Put a walk on screen before its audio exists: map, title and re-centering only. The engine
     /// is deliberately not loaded — there is nothing yet for it to play.
     private func showWalkShell(_ exp: Experience) {
-        if current?.id != exp.id { introShowings = 0 }
+        if current?.id != exp.id { introShowings = 0; showFarAwayCard = false }
         current = anchoredIfPortable(exp)
         offset = .none
         engine.setOffset(.none)
@@ -339,7 +411,7 @@ final class AppState: ObservableObject {
         // Only the list-facing state changes here, with animations off.
         var t = Transaction(); t.disablesAnimations = true
         withTransaction(t) {
-            if wasCurrent { current = nil; showIntroCard = false }
+            if wasCurrent { current = nil; showIntroCard = false; showFarAwayCard = false }
             refreshDownloadedIds()
         }
 
@@ -391,6 +463,8 @@ final class AppState: ObservableObject {
         engine.setOffset(.none)
         experiences = ExperienceLibrary.loadAll()
         current = nil
+        showIntroCard = false
+        showFarAwayCard = false
         showPermissionDeniedAlert = false
         appearance = .system
         hasOnboarded = false            // drops the UI back to OnboardingView
@@ -405,12 +479,6 @@ final class AppState: ObservableObject {
     }
 
     func enableLocation() { location.requestPermission() }
-
-    func checkPermissionOutcome() {
-        if location.authorization == .denied || location.authorization == .restricted {
-            showPermissionDeniedAlert = true
-        }
-    }
 
     // MARK: - Playback
 

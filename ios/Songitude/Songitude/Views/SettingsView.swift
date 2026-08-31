@@ -7,12 +7,14 @@ struct SettingsView: View {
     @EnvironmentObject var app: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var confirmReset = false
+    @State private var reporting: ReportKind?
 
     var body: some View {
         NavigationView {
             Form {
                 permissionsSection
                 appearanceSection
+                reportSection
                 creditsSection
                 debugSection
             }
@@ -21,6 +23,9 @@ struct SettingsView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .sheet(item: $reporting) { kind in
+                ReportView(kind: kind).environmentObject(app)
             }
             .alert("Reset App?", isPresented: $confirmReset) {
                 Button("Reset", role: .destructive) { app.resetEverything(); dismiss() }
@@ -63,6 +68,26 @@ struct SettingsView: View {
         case .restricted: return "Restricted"
         case .notDetermined: return "Not set"
         @unknown default: return "Unknown"
+        }
+    }
+
+    /// Reporting lives right above Credits: one row per thing a listener might need to flag, with
+    /// the loaded walk and its artist filled in so they don't have to describe which one they mean.
+    private var reportSection: some View {
+        Section("Report") {
+            let walk = app.selectedExperience?.displayName
+            let artist: String? = {
+                let c = app.currentRemoteWalk?.creatorText ?? app.selectedExperience?.map.creator ?? ""
+                return c.isEmpty ? nil : c
+            }()
+            Button(ReportKind.walk.buttonTitle(walk: walk, artist: artist)) { reporting = .walk }
+                .disabled(walk == nil)
+            Button(ReportKind.artist.buttonTitle(walk: walk, artist: artist)) { reporting = .artist }
+                .disabled(artist == nil)
+            Button(ReportKind.issue.buttonTitle(walk: walk, artist: artist)) { reporting = .issue }
+            if let mail = URL(string: "mailto:brian.e2014@gmail.com") {
+                Link("Email brian.e2014@gmail.com", destination: mail).font(.footnote)
+            }
         }
     }
 

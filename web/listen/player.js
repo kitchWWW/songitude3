@@ -13,25 +13,70 @@
   const DIALOGUE_STATE_OPACITY = { unplayed: 0.2, queued: 0.42, playing: 0.6, finished: 0.08 };
   const INTRO_GATE_MS = 60 * 60 * 1000;   // don't replay a walk's intro within 1 hour (resume window)
   const DONE_DELAY_MS = 30 * 1000;        // show the "Play Outro" button this long after play starts
+  const SKIP_S = 15;                      // how far one press of a skip button moves every voice
 
   const $ = (id) => document.getElementById(id);
   const walksListEl = $("walksList");
 
   // ---- map ----
+  // CARTO Positron, greyed by CSS (.leaflet-tile-pane) so authored areas are the only colour.
+  // The key became mandatory in Aug 2026 — without it CARTO stamps "API KEY REQUIRED" across every
+  // tile. It is a *public* key by nature (it rides in every tile URL, visible to anyone who loads
+  // the map), so restrict it by domain in the CARTO dashboard rather than treating it as a secret.
+  // Keep in step with editor/editor.js and ios/Songitude/Songitude/Views/MapOverlayView.swift.
+  const CARTO_KEY = "cb1_2log_1_19551f9fb4c0fbe576aadb40";
+  const BASEMAP_URL =
+    "https://basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}{r}.png?key=" + CARTO_KEY;
+
   const lmap = L.map("map", { zoomControl: false }).setView([40.7128, -74.006], 15);
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-    { attribution: "&copy; OpenStreetMap &copy; CARTO", subdomains: "abcd", maxZoom: 20 }).addTo(lmap);
+  L.tileLayer(BASEMAP_URL,
+    { attribution: "&copy; OpenStreetMap &copy; CARTO", maxZoom: 20 }).addTo(lmap);
 
   // ---- state ----
   let ctx = null, masterGain = null;
-  let walk = null, shapes = [];
+  let walk = null, shapes = [], routes = [];
   const buffers = new Map(), loadingFiles = new Set();
   let running = false, syncedStarted = false, userCoord = null;
   let manifestWalks = [];
   let shapeLayers = new Map();
+  let routeLayers = [];      // suggested-route polylines + their endpoint markers
   let dialogueQueue = [], dialoguePlaying = null;   // one dialogue plays at a time; others wait in line
   let outroActive = false, doneTimer = null, introVoice = null, exitVoice = null;   // intro/exit (walk-level) clips
+  // When the synced loops launched (context time) and the seconds of skipping applied since. A
+  // synced voice's position comes from these rather than its own clock, so a skip lands every
+  // synced clip on the same offset and they stay aligned with each other.
+  let syncedEpoch = 0, syncedShift = 0;
   const dColor = (st) => (walk && walk.map.dialogueColors && walk.map.dialogueColors[st]) || DEFAULT_DIALOGUE_COLORS[st];
+  // "fuzzy" drops the outline and feathers each area's edge outward over a band this fraction of
+  // its size; a polygon also takes a round-jointed stroke, which rounds its corners into a blob.
+  // Absent from the bundle ⇒ "classic", the outlined look every walk published before it had.
+  const FUZZ_BAND = 0.08;
+  const fuzzyOn = () => !!(walk && walk.map && walk.map.displayStyle === "fuzzy");
+  // Half the shape's smaller on-screen dimension, i.e. a radius in pixels at the current zoom.
+  function shapePixelSize(s, layer) {
+    if (!layer) return 0;
+    if (s.type === "circle") return layer._radius || 0;
+    const b = layer.getBounds();
+    const nw = lmap.latLngToLayerPoint(b.getNorthWest()), se = lmap.latLngToLayerPoint(b.getSouthEast());
+    return Math.min(Math.abs(se.x - nw.x), Math.abs(se.y - nw.y)) / 2;
+  }
+  // The stroke only exists to round a polygon's corners, so it matches the fill exactly; the blur
+  // on the path element does the feathering.
+  function withFuzz(s, layer, style) {
+    // Classic has to put the stroke's alpha back explicitly — Leaflet keeps whatever was last set.
+    if (!fuzzyOn()) return { opacity: 1, ...style };
+    const fill = style.fillColor || style.color;
+    const op = style.fillOpacity ?? 0.2;
+    return { ...style, color: fill, fillColor: fill, opacity: op,
+             weight: s.type === "polygon" ? Math.max(1, FUZZ_BAND * shapePixelSize(s, layer) * 0.6) : 0 };
+  }
+  function applyFuzz(s, layer) {
+    const path = layer && layer._path; if (!path) return;
+    const size = fuzzyOn() ? shapePixelSize(s, layer) : 0;
+    path.style.filter = size > 4 ? `blur(${(FUZZ_BAND * size / 2).toFixed(2)}px)` : "";
+  }
+  // The feather is sized in screen pixels, so it is redrawn whenever the scale changes.
+  lmap.on("zoomend", () => { for (const s of shapes) applyFuzz(s, shapeLayers.get(s.id)); });
 
   // ---- geometry ----
   const R = 6371000, toR = (x) => x * Math.PI / 180;
@@ -70,10 +115,16 @@
 
   // ---- audio engine ----
   function syncedFiles() { return [...new Set(shapes.filter((s) => s.mode === "syncedLoop" && s.audioFile).map((s) => s.audioFile))]; }
+  // The listener is standing inside at least one soloed area. While that holds, only soloed areas
+  // are audible; everything else they're inside ducks to silence and returns when they step out.
+  let soloOn = false;
+  // A duck is a gain change, never a stop — the ducked voice keeps running underneath so it comes
+  // back where it would have been. Applies to every mode alike, dialogue included.
+  function duckFor(s) { return (soloOn && !s.solo) ? 0 : 1; }
   function targetGain(s, c) {
     if (s.type === "circle" && s.falloff && s.falloff !== "none" && s.center && s.radius)
-      return s.gain * falloffLevel(s.falloff, haversine(s.center, c) / s.radius);
-    return s.gain;
+      return s.gain * falloffLevel(s.falloff, haversine(s.center, c) / s.radius) * duckFor(s);
+    return s.gain * duckFor(s);
   }
   function rampGain(g, target, dur) {
     const t = ctx.currentTime;
@@ -82,21 +133,25 @@
   }
   // A crossfade loop: overlapping copies of `buf` under `destGain`, each fading in as the previous
   // fades out. Returns an object with stop(when), so it drops into the same slot as a looping source.
-  function makeCrossfadeLoop(buf, crossfade, destGain) {
+  // `startOffset` begins the cycle partway into the clip, which is how a skip lands on a crossfade
+  // loop: its copies are scheduled ahead of time and can't be nudged once they're out, so the whole
+  // overlap cycle is rebuilt at the new offset instead.
+  function makeCrossfadeLoop(buf, crossfade, destGain, startOffset) {
     const D = buf.duration;
     const C = Math.min(Math.max(0.05, crossfade || 1), D * 0.5);   // clamp to ≤ half the clip
     const period = Math.max(0.05, D - C);
     const active = new Set();
-    let nextStart = ctx.currentTime, first = true, stopAt = Infinity, torn = false;
-    const scheduleCopy = (startAt) => {
+    let nextStart = 0, first = true, stopAt = Infinity, torn = false;
+    const scheduleCopy = (startAt, bufOffset) => {
+      const off = bufOffset || 0, span = D - off;   // a copy that starts late also ends early
       const src = ctx.createBufferSource(); src.buffer = buf;
       const cg = ctx.createGain();
       if (first) { cg.gain.setValueAtTime(1, startAt); first = false; }
       else { cg.gain.setValueAtTime(0.0001, startAt); cg.gain.linearRampToValueAtTime(1, startAt + C); }
-      cg.gain.setValueAtTime(1, startAt + D - C);
-      cg.gain.linearRampToValueAtTime(0.0001, startAt + D);
+      cg.gain.setValueAtTime(1, startAt + span - C);
+      cg.gain.linearRampToValueAtTime(0.0001, startAt + span);
       src.connect(cg).connect(destGain);
-      src.start(startAt); src.stop(startAt + D + 0.05);
+      src.start(startAt, off); src.stop(startAt + span + 0.05);
       active.add(src); src.onended = () => active.delete(src);
     };
     const tick = () => {
@@ -104,6 +159,9 @@
       const ahead = Math.min(ctx.currentTime + 0.4, stopAt);
       while (nextStart < ahead) { scheduleCopy(nextStart); nextStart += period; }
     };
+    const begin = ctx.currentTime, head = Math.min(Math.max(0, startOffset || 0), D * 0.999);
+    scheduleCopy(begin, head);                       // the copy that lands on the requested offset
+    nextStart = begin + Math.max(0.05, (D - head) - C);
     tick();
     const timer = setInterval(tick, 150);
     const teardown = () => { if (torn) return; torn = true; clearInterval(timer); for (const src of active) { try { src.stop(ctx.currentTime); } catch (_) {} } };
@@ -122,16 +180,20 @@
     g.gain.linearRampToValueAtTime(Math.max(0.0001, targetGain(s, c)), ctx.currentTime + Math.max(0.01, s.fadeIn));
     g.connect(masterGain);
     s._rt.gain = g;
+    s._rt.startedAt = ctx.currentTime; s._rt.offset = 0;
     if (s.loopMode === "crossfade") {
-      s._rt.source = makeCrossfadeLoop(buf, s.crossfade, g);
+      s._rt.source = makeCrossfadeLoop(buf, s.crossfade, g, 0);
     } else {
       const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
       src.connect(g); src.start();
       s._rt.source = src;
     }
   }
-  function updateLoopGain(s, c) {
-    if (s.type === "circle" && s.falloff && s.falloff !== "none" && s._rt.gain) rampGain(s._rt.gain, targetGain(s, c), 0.12);
+  function updateLoopGain(s, c, duckChanged, duckDur) {
+    if (!s._rt.gain) return;
+    const tracksProximity = s.type === "circle" && s.falloff && s.falloff !== "none";
+    if (!tracksProximity && !duckChanged) return;   // constant-gain loop, nothing moved it
+    rampGain(s._rt.gain, targetGain(s, c), duckChanged ? duckDur : 0.12);
   }
   function stopLoop(s) {
     const rt = s._rt; if (!rt.source) return;
@@ -143,9 +205,15 @@
   function playOnce(s) {
     const buf = buffers.get(s.audioFile); if (!buf) return;
     const src = ctx.createBufferSource(); src.buffer = buf;
-    const g = ctx.createGain(); g.gain.value = s.gain; src.connect(g).connect(masterGain);
-    src.onended = () => { if (s._rt && s._rt.source === src) { s._rt.source = null; s._rt.gain = null; reflectSounding(); } };
+    const g = ctx.createGain(); g.gain.value = Math.max(0.0001, s.gain * duckFor(s)); src.connect(g).connect(masterGain);
+    src.onended = oneshotEnded(s, src);
     src.start(); s._rt.source = src; s._rt.gain = g;
+    s._rt.startedAt = ctx.currentTime; s._rt.offset = 0;
+  }
+  // A one-shot has played itself out: drop the voice, leaving `armed` to the location pass so it
+  // only re-arms on the way out of the area.
+  function oneshotEnded(s, src) {
+    return () => { if (s._rt && s._rt.source === src) { s._rt.source = null; s._rt.gain = null; reflectSounding(); } };
   }
   // Dialogue: play once, one at a time. Next queued dialogue starts when the current one finishes.
   async function advanceDialogue() {
@@ -162,10 +230,14 @@
     const buf = s.audioFile ? buffers.get(s.audioFile) : null;
     if (!buf) return onDialogueFinished(s);
     const src = ctx.createBufferSource(); src.buffer = buf;
-    const g = ctx.createGain(); g.gain.value = s.gain; src.connect(g).connect(masterGain);
-    src.onended = () => { if (s._rt && s._rt.source === src) { s._rt.source = null; s._rt.gain = null; onDialogueFinished(s); } };
+    const g = ctx.createGain(); g.gain.value = Math.max(0.0001, s.gain * duckFor(s)); src.connect(g).connect(masterGain);
+    src.onended = dialogueEnded(s, src);
     src.start(); s._rt.source = src; s._rt.gain = g;
+    s._rt.startedAt = ctx.currentTime; s._rt.offset = 0;
     reflectSounding();
+  }
+  function dialogueEnded(s, src) {
+    return () => { if (s._rt && s._rt.source === src) { s._rt.source = null; s._rt.gain = null; onDialogueFinished(s); } };
   }
   function onDialogueFinished(s) {
     if (dialoguePlaying === s.id) dialoguePlaying = null;
@@ -181,7 +253,7 @@
     const g = ctx.createGain(); g.gain.value = gain; src.connect(g).connect(masterGain);
     if (onended) src.onended = onended;
     src.start();
-    return { src, g };
+    return { src, g, buf, onended, startedAt: ctx.currentTime, offset: 0 };
   }
   // Fade + stop every sounding voice matching `pick`, over `dur` seconds.
   function fadeVoices(dur, pick) {
@@ -231,6 +303,79 @@
     stop();
     setStatus("That's the end of the walk. 🎧");
   }
+  // ---- skip (the ±15 s buttons) ----
+  // Only ever a playhead move: it does not rewind the listener's position, revisit areas they have
+  // walked out of, or start anything that isn't already sounding. The modes differ only in what the
+  // ends of a clip mean — a loop wraps both ways, while a one-shot or dialogue is meant to be heard
+  // once through, so rewinding past its start restarts it and skipping past its end plays it out.
+  function playhead(rt) { return (ctx.currentTime - rt.startedAt) + rt.offset; }
+  function wrapPos(pos, D) { const p = pos % D; return p < 0 ? p + D : p; }
+
+  // Swap in a fresh source playing from `offset` seconds in, keeping the voice's gain node — and so
+  // its level and any ramp in flight — exactly as it was.
+  function restartSource(s, offset, when, loop) {
+    const buf = buffers.get(s.audioFile); if (!buf || !s._rt.gain) return null;
+    const old = s._rt.source;
+    if (old) { try { old.onended = null; old.stop(); } catch (_) {} }
+    const src = ctx.createBufferSource(); src.buffer = buf; src.loop = !!loop;
+    src.connect(s._rt.gain);
+    const at = (typeof when === "number") ? when : ctx.currentTime;
+    src.start(at, offset);
+    s._rt.source = src; s._rt.startedAt = at; s._rt.offset = offset;
+    return src;
+  }
+
+  function skip(delta) {
+    // The outro is a timed sequence (fade → clip → fade → stop); moving its audio underneath those
+    // timers would only desynchronise them from what is actually playing.
+    if (!running || outroActive || !ctx || !delta) return;
+    // Every synced loop restarts at one common time, so they resume in lock-step.
+    const syncedAt = ctx.currentTime + 0.15;
+    syncedShift += delta;
+
+    for (const s of shapes) {
+      const rt = s._rt; if (!rt || !rt.source) continue;
+      const buf = s.audioFile && buffers.get(s.audioFile); if (!buf || !(buf.duration > 0)) continue;
+      const D = buf.duration;
+      if (s.mode === "syncedLoop") {
+        restartSource(s, wrapPos((syncedAt - syncedEpoch) + syncedShift, D), syncedAt, true);
+      } else if (s.mode === "loop") {
+        const pos = wrapPos(playhead(rt) + delta, D);
+        if (s.loopMode === "crossfade") {
+          try { rt.source.stop(); } catch (_) {}
+          rt.source = makeCrossfadeLoop(buf, s.crossfade, rt.gain, pos);
+          rt.startedAt = ctx.currentTime; rt.offset = pos;
+        } else {
+          restartSource(s, pos, null, true);
+        }
+      } else {
+        const pos = playhead(rt) + delta;
+        if (pos >= D) {                       // past the end ⇒ the same as having heard it out
+          try { rt.source.onended = null; rt.source.stop(); } catch (_) {}
+          rt.source = null; rt.gain = null;
+          if (s.mode === "dialogue") onDialogueFinished(s); else reflectSounding();
+        } else {
+          const src = restartSource(s, Math.max(0, pos), null, false);
+          if (src) src.onended = s.mode === "dialogue" ? dialogueEnded(s, src) : oneshotEnded(s, src);
+        }
+      }
+    }
+    // The walk's intro is a clip like any other, so it moves with everything else.
+    if (introVoice) skipClip(introVoice, delta);
+    reflectSounding();
+  }
+
+  function skipClip(v, delta) {
+    const D = v.buf.duration; if (!(D > 0)) return;
+    const pos = (ctx.currentTime - v.startedAt) + v.offset + delta;
+    try { v.src.onended = null; v.src.stop(); } catch (_) {}
+    if (pos >= D) { if (v.onended) v.onended(); return; }
+    const src = ctx.createBufferSource(); src.buffer = v.buf;
+    src.connect(v.g); src.onended = v.onended || null;
+    src.start(ctx.currentTime, Math.max(0, pos));
+    v.src = src; v.startedAt = ctx.currentTime; v.offset = Math.max(0, pos);
+  }
+
   function startSyncedIfReady() {
     if (!running || syncedStarted) return;
     const files = syncedFiles(); if (!files.length) { syncedStarted = true; return; }
@@ -244,7 +389,9 @@
       const g = ctx.createGain(); g.gain.setValueAtTime(0, ctx.currentTime);
       src.connect(g).connect(masterGain); src.start(startAt);
       s._rt.source = src; s._rt.gain = g;
+      s._rt.startedAt = startAt; s._rt.offset = 0;
     }
+    syncedEpoch = startAt; syncedShift = 0;
     syncedStarted = true; reflectSounding();
   }
 
@@ -276,24 +423,35 @@
     startSyncedIfReady();
     const inside = new Set();
     for (const s of shapes) if (contains(s, c)) inside.add(s.id);
+    soloOn = shapes.some((s) => s.solo && inside.has(s.id));
     for (const s of shapes) {
       if (!s._rt) s._rt = { inside: false, armed: true, source: null, gain: null, dstate: "unplayed" };
       const rt = s._rt, nowIn = inside.has(s.id), rising = nowIn && !rt.inside;
+      // A solo switching on or off has to move voices that set their gain once (one-shots,
+      // dialogue) or hold a constant level (loops with no falloff). Ducking in and out uses the
+      // ducked shape's own fades, so it sounds like leaving and re-entering it.
+      const duck = duckFor(s);
+      const duckChanged = rt.duck !== undefined && rt.duck !== duck;
+      const duckDur = duck ? Math.max(0.02, s.fadeIn) : Math.max(0.02, s.fadeOut);
+      rt.duck = duck;
       if (s.mode === "loop") {
         if (nowIn && !rt.source) startLoop(s, c);
-        else if (nowIn && rt.source) updateLoopGain(s, c);
+        else if (nowIn && rt.source) updateLoopGain(s, c, duckChanged, duckDur);
         else if (!nowIn && rt.source) stopLoop(s);
       } else if (s.mode === "syncedLoop") {
         if (rt.source) {
           const target = nowIn ? targetGain(s, c) : 0;
-          const dur = rising ? Math.max(0.02, s.fadeIn) : (!nowIn && rt.inside ? Math.max(0.02, s.fadeOut) : 0.12);
+          const dur = duckChanged ? duckDur
+                    : rising ? Math.max(0.02, s.fadeIn) : (!nowIn && rt.inside ? Math.max(0.02, s.fadeOut) : 0.12);
           rampGain(rt.gain, target, dur);
         }
       } else if (s.mode === "oneshot") {
         if (rising && rt.armed) { playOnce(s); rt.armed = false; }
         if (!nowIn) rt.armed = true;
+        if (duckChanged && rt.gain) rampGain(rt.gain, s.gain * duck, duckDur);
       } else { // dialogue: play once ever; queue behind any dialogue already playing
         if (rising && rt.dstate === "unplayed") { rt.dstate = "queued"; dialogueQueue.push(s.id); advanceDialogue(); }
+        if (duckChanged && rt.gain) rampGain(rt.gain, s.gain * duck, duckDur);
       }
       rt.inside = nowIn;
     }
@@ -306,11 +464,13 @@
       if (s.mode === "dialogue") {
         const st = (running && s._rt && s._rt.dstate) || "unplayed";
         const col = dColor(st);
-        layer.setStyle({ color: col, fillColor: col, fillOpacity: DIALOGUE_STATE_OPACITY[st], weight: st === "playing" ? 3 : 2 });
+        layer.setStyle(withFuzz(s, layer, { color: col, fillColor: col, fillOpacity: DIALOGUE_STATE_OPACITY[st], weight: st === "playing" ? 3 : 2 }));
       } else {
         const on = !!(s._rt && s._rt.source && (!s._rt.gain || s._rt.gain.gain.value > 0.01));
-        layer.setStyle({ fillOpacity: on ? 0.5 : 0.2, weight: on ? 3 : 2 });
+        const base = s.color || "#4363d8";   // same fallback drawShapes used when the shape has no colour
+        layer.setStyle(withFuzz(s, layer, { color: base, fillColor: base, fillOpacity: on ? 0.5 : 0.2, weight: on ? 3 : 2 }));
       }
+      applyFuzz(s, layer);
     }
   }
 
@@ -318,14 +478,53 @@
   function drawShapes() {
     shapeLayers.forEach((l) => lmap.removeLayer(l)); shapeLayers.clear();
     for (const s of shapes) {
+      if (s.hidden) continue;              // audible, but the listener never sees it
       const base = s.mode === "dialogue" ? dColor("unplayed") : (s.color || "#4363d8");
       const fo = s.mode === "dialogue" ? DIALOGUE_STATE_OPACITY.unplayed : 0.2;
       const style = { color: base, weight: 2, fillColor: base, fillOpacity: fo };
       let layer = null;
       if (s.type === "circle" && s.center && s.radius != null) layer = L.circle(s.center, { radius: s.radius, ...style });
       else if (s.type === "polygon" && s.points && s.points.length >= 3) layer = L.polygon(s.points, style);
-      if (layer) { layer.addTo(lmap); shapeLayers.set(s.id, layer); }
+      if (layer) {
+        layer.addTo(lmap); shapeLayers.set(s.id, layer);
+        if (fuzzyOn()) { layer.setStyle(withFuzz(s, layer, style)); applyFuzz(s, layer); }
+      }
     }
+  }
+
+  // ---- suggested routes on map ----
+  // Purely decorative: a route never sounds, never gates anything, and is simply drawn under the
+  // sound areas as a hint about where to walk. Round caps and joins come free from the SVG stroke.
+  function drawRoutes() {
+    routeLayers.forEach((l) => lmap.removeLayer(l)); routeLayers = [];
+    for (const r of routes) {
+      if (!Array.isArray(r.points) || r.points.length < 2) continue;
+      const color = r.color || "#111111";
+      const line = L.polyline(r.points, { color, weight: r.width ?? 6, opacity: 0.9,
+                                          lineCap: "round", lineJoin: "round", interactive: false });
+      line.addTo(lmap); line.bringToBack();
+      routeLayers.push(line);
+      const w = r.width ?? 6;
+      routeLayers.push(routeEndMarker(r.points[0], color, r.startLabel, w));
+      routeLayers.push(routeEndMarker(r.points[r.points.length - 1], color, r.endLabel, w));
+    }
+  }
+  /// A solid dot in the route's own colour, sized off the line width so it reads as the end of the
+  /// stroke rather than a badge on top of it. The icon height is fixed in CSS so iconAnchor can keep
+  /// the dot — not the label beside it — sitting on the point.
+  function routeEndMarker(pt, color, label, width) {
+    const d = Math.max(6, Math.min(width, 14));
+    const text = label ? `<b style="color:${color}">${escapeHtml(label)}</b>` : "";
+    const icon = L.divIcon({
+      className: "route-end",
+      html: `<i style="background:${color};width:${d}px;height:${d}px"></i>` + text,
+      iconSize: null, iconAnchor: [d / 2, 10],
+    });
+    return L.marker(pt, { icon, interactive: false, keyboard: false, zIndexOffset: 500 }).addTo(lmap);
+  }
+  function escapeHtml(v) {
+    return String(v).replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
   // ---- GPS + slew ----
@@ -338,7 +537,15 @@
     if (watchId != null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
     if (slewTimer) { clearInterval(slewTimer); slewTimer = null; }
   }
-  function onFix(pos) { const c = [pos.coords.latitude, pos.coords.longitude]; updateUserMarker(c); ingestFix(c); }
+  function onFix(pos) {
+    if (explore) return;                       // a stray fix must not fight the virtual walker
+    const c = [pos.coords.latitude, pos.coords.longitude];
+    updateUserMarker(c); ingestFix(c);
+    // Far enough from every area that standing here would produce nothing but silence — which reads
+    // as a broken page rather than as "you aren't there yet". Offer the alternative instead.
+    const d = nearestAreaDistance(c);
+    if (d > FAR_M) offerExplore(`You're about ${fmtDist(d)} from this walk, so where you're standing won't trigger any of it.`);
+  }
   function ingestFix(c) {
     if (!virtual) { virtual = c; updateLocation(c); return; }
     if (slewTimer) clearInterval(slewTimer);
@@ -352,9 +559,102 @@
     }, 200);
   }
   function onGeoErr(e) {
-    if (e.code === 1) { toast("Location permission denied — enable it to hear the walk.", "err"); stop(); }
-    else toast("Location error: " + e.message, "err");
+    if (explore) return;
+    if (e.code === 1) {
+      stop();
+      offerExplore("Without your location the walk can't tell where you are in it.");
+    } else {
+      toast("Location error: " + e.message, "err");
+      offerExplore("Your location isn't coming through, so the walk can't follow you.");
+    }
   }
+
+  // ---- explore mode: click through the walk without being there ----
+  // The same engine, driven by a virtual walker you move with map clicks instead of by GPS. The
+  // intro, every area, the dialogue queue and the outro all behave exactly as they do on location —
+  // only the footsteps are simulated. For listeners who want to hear a walk they can't travel to.
+  const EXPLORE_SPEED = { walking: 1.4, running: 3.5, biking: 6.7, driving: 13.4 };   // m/s; teleport is instant
+  const FAR_M = 4828;                          // ~3 miles from the nearest area
+  let explore = false, exploreOffered = false, exploreSpeed = "walking";
+  let exPos = null, exTarget = null, exRAF = null, exFrameTs = 0, exEngineTs = 0;
+
+  function nearestAreaDistance(c) {
+    let best = Infinity;
+    for (const s of shapes) best = Math.min(best, regionDistance(s, c));
+    return best;
+  }
+  // Offered once per walk: past that it would be nagging, and the bar is always there to switch back.
+  function offerExplore(copy) {
+    if (explore || exploreOffered || !walk || !shapes.length) return;
+    exploreOffered = true;
+    $("exploreCopy").textContent = copy + " You can still hear all of it by clicking your way around the map.";
+    $("exploreOverlay").hidden = false;
+  }
+
+  function enterExplore() {
+    $("exploreOverlay").hidden = true;
+    explore = true;
+    document.body.classList.add("exploring");
+    $("exploreBar").hidden = false;
+    stopWatch(); virtual = null;
+    // Start in the middle of the walk, so there is something to set off towards.
+    const start = walk && walk.map && walk.map.center;
+    if (Array.isArray(start) && start.length === 2) {
+      exPos = start.slice(); exTarget = exPos.slice();
+      updateUserMarker(exPos);
+      if (running) updateLocation(exPos);
+    }
+    setStatus(running ? "Exploring — click the map to walk there. 🎧"
+                      : "Exploring — press play, then click the map to walk.");
+  }
+
+  function exitExplore() {
+    $("exploreOverlay").hidden = true;
+    explore = false;
+    document.body.classList.remove("exploring");
+    $("exploreBar").hidden = true;
+    stopExploreMove();
+    exPos = null; exTarget = null;
+    if (running) { startWatch(); setStatus("Listening — keep this page open and your screen on. 🎧"); }
+    else setStatus("Ready — press play, then start walking.");
+  }
+
+  // A map click sets the target: teleport jumps, the rest walk there at their own pace.
+  function placeExplorer(latlng) {
+    const target = [latlng.lat, latlng.lng];
+    if (exploreSpeed === "teleport" || !exPos) {
+      stopExploreMove();
+      exPos = target; exTarget = target;
+      updateUserMarker(exPos);
+      if (running) updateLocation(exPos);
+      return;
+    }
+    exTarget = target;                         // a moving target: the walker re-routes toward it
+    startExploreMove();
+  }
+  function startExploreMove() { if (!exRAF) { exFrameTs = 0; exRAF = requestAnimationFrame(stepExplore); } }
+  function stopExploreMove() { if (exRAF) { cancelAnimationFrame(exRAF); exRAF = null; } }
+
+  function stepExplore(ts) {
+    if (!exPos || !exTarget) { exRAF = null; return; }
+    if (!exFrameTs) exFrameTs = ts;
+    const dt = Math.min(0.1, (ts - exFrameTs) / 1000); exFrameTs = ts;
+    const remaining = haversine(exPos, exTarget);
+    const step = (EXPLORE_SPEED[exploreSpeed] || 1.4) * dt;   // metres this frame
+    if (remaining <= step || remaining < 0.3) {               // arrived
+      exPos = exTarget; exRAF = null;
+      updateUserMarker(exPos);
+      if (running) updateLocation(exPos);
+      return;
+    }
+    const f = step / remaining;
+    exPos = [exPos[0] + (exTarget[0] - exPos[0]) * f, exPos[1] + (exTarget[1] - exPos[1]) * f];
+    updateUserMarker(exPos);
+    if (running && ts - exEngineTs > 60) { updateLocation(exPos); exEngineTs = ts; }   // ~16 Hz audio
+    exRAF = requestAnimationFrame(stepExplore);
+  }
+
+  lmap.on("click", (e) => { if (explore) placeExplorer(e.latlng); });
   function updateUserMarker(c) {
     if (!userMarker) {
       userMarker = L.marker(c, { icon: L.divIcon({ className: "", html: '<div class="user-marker"></div>', iconSize: [18, 18], iconAnchor: [9, 9] }) }).addTo(lmap);
@@ -384,12 +684,13 @@
     if (!walk) { openPicker(); return; }
     if (!ctx) { ctx = new (window.AudioContext || window.webkitAudioContext)(); masterGain = ctx.createGain(); masterGain.connect(ctx.destination); }
     if (ctx.state === "suspended") await ctx.resume();
-    running = true; syncedStarted = false; userCoord = null;
+    running = true; syncedStarted = false; userCoord = null; soloOn = false;
+    syncedEpoch = 0; syncedShift = 0;
     dialogueQueue = []; dialoguePlaying = null;
     for (const s of shapes) s._rt = { inside: false, armed: true, source: null, gain: null, dstate: "unplayed" };
     syncedFiles().forEach(ensureBuffer);   // synced loops load immediately, start when all ready
     startSyncedIfReady();
-    startWatch();
+    if (explore) { if (exPos) updateLocation(exPos); } else startWatch();
     acquireWake(); setMediaPlaying(true);
     // Reset the end-session UI and arm the "Play Outro" button; play the intro (gated per walk).
     outroActive = false;
@@ -400,11 +701,15 @@
       if (running && walk && walk.map && walk.map.exit) $("doneBtn").hidden = false;
     }, DONE_DELAY_MS);
     maybePlayIntro();
-    renderPlay(); setStatus("Listening — keep this page open and your screen on. 🎧");
+    renderPlay();
+    setStatus(explore ? "Exploring — click the map to walk there. 🎧"
+                      : "Listening — keep this page open and your screen on. 🎧");
   }
   function stop() {
-    running = false; syncedStarted = false;
+    running = false; syncedStarted = false; soloOn = false;
+    syncedEpoch = 0; syncedShift = 0;
     stopWatch(); virtual = null;
+    stopExploreMove();                     // the walker stops where it stands; explore mode itself stays on
     dialogueQueue = []; dialoguePlaying = null;
     outroActive = false;
     clearTimeout(doneTimer); doneTimer = null;
@@ -423,6 +728,10 @@
     b.textContent = running ? "❚❚" : "▶";
     b.classList.toggle("playing", running);
     b.setAttribute("aria-label", running ? "Pause" : "Play");
+    // The skips hold their place either side of play whether or not anything is sounding, so the
+    // play button never moves under the thumb.
+    $("skipBackBtn").disabled = !running;
+    $("skipFwdBtn").disabled = !running;
   }
 
   // ---- catalog + walk loading ----
@@ -510,10 +819,14 @@
         else toast("Couldn't read your location — showing this walk where it was authored.", "err");
       }
       walk = { id, base, map: mapData };
+      exploreOffered = false;              // a different walk earns its own offer
+      if (explore) exitExplore();          // and starts from the listener's real location again
       shapes = (mapData.shapes || []).map((s) => ({ ...s, _rt: null }));
+      routes = mapData.routes || [];
       buffers.clear(); loadingFiles.clear(); syncedStarted = false;
       dialogueQueue = []; dialoguePlaying = null;
       drawShapes();
+      drawRoutes();
       fitToWalk(mapData);
       $("titleBtn").textContent = (mapData.name || "Soundwalk") + " ▾";
       setMediaMeta();
@@ -668,6 +981,9 @@
       if (Array.isArray(sh.points)) c.points = sh.points.map(move);
       return c;
     });
+    // Routes travel with the walk — a suggested path left behind in the authoring city is worse
+    // than none at all.
+    out.routes = (mapData.routes || []).map((r) => ({ ...r, points: (r.points || []).map(move) }));
     return out;
   }
 
@@ -717,6 +1033,7 @@
       }
       for (const p of sh.points || []) if (p.length === 2) pts.push(p);
     }
+    for (const r of mapData.routes || []) for (const p of r.points || []) if (p.length === 2) pts.push(p);
     if (pts.length) lmap.fitBounds(L.latLngBounds(pts).pad(0.18), { maxZoom: 18 });
     else if (Array.isArray(mapData.center)) lmap.setView(mapData.center, mapData.zoom || 16);
   }
@@ -733,6 +1050,17 @@
 
   // ---- wiring ----
   $("playBtn").onclick = () => { if (!$("introOverlay").hidden) closeIntro(); toggle(); };
+  $("exploreGo").onclick = enterExplore;
+  $("exploreStay").onclick = () => { $("exploreOverlay").hidden = true; };
+  $("exploreClose").onclick = () => { $("exploreOverlay").hidden = true; };
+  $("exploreExit").onclick = exitExplore;
+  $("exploreSpeed").onchange = (e) => {
+    exploreSpeed = e.target.value;
+    if (exploreSpeed === "teleport") stopExploreMove();
+    else if (exPos && exTarget && haversine(exPos, exTarget) > 0.3) startExploreMove();
+  };
+  $("skipBackBtn").onclick = () => skip(-SKIP_S);
+  $("skipFwdBtn").onclick = () => skip(SKIP_S);
   $("doneBtn").onclick = endSession;
   $("browseBtn").onclick = openPicker;
   // The title reopens the current walk's card (as in the app); the browse button stays the only

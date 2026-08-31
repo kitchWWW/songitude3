@@ -19,17 +19,17 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
-	<string>4</string>
+	<string>7</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Allowing location Always lets the sound walk keep playing correctly while your phone is locked and in your pocket as you move.</string>
+	<string>Songitude uses your location to play the sounds placed around you, and to keep the walk playing while your phone is locked and in your pocket.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
-	<string>Allowing location Always lets the sound walk keep playing correctly while your phone is locked and in your pocket as you move.</string>
+	<string>Songitude uses your location to play the sounds placed around you, and to keep the walk playing while your phone is locked and in your pocket.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Songitude uses your location to play the sounds placed around you. Choosing “While Using the App” lets the experience keep playing and following you while your phone is locked and in your pocket.</string>
+	<string>Songitude uses your location to play the sounds placed around you, and to keep the walk playing while your phone is locked and in your pocket.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>
@@ -42,16 +42,14 @@
 		<key>UIColorName</key>
 		<string></string>
 	</dict>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>gps</string>
+		<string>location-services</string>
+	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-	</array>
-	<key>UISupportedInterfaceOrientations~ipad</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 </dict>
 </plist>

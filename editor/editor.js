@@ -10,7 +10,7 @@
   const DEFAULT_INTRO_COLOR = "#101014";
   const state = {
     mode: "edit",              // "edit" | "listen"
-    tool: "select",            // "select" | "polygon" | "circle"
+    tool: "select",            // "select" | "pan" | "polygon" | "circle" | "route"
     name: "",
     creator: "",
     about: "",
@@ -24,7 +24,9 @@
     center: [40.7128, -74.006],
     zoom: 15,
     shapes: [],                // see makeShape()
+    routes: [],                // see makeRoute() — purely visual suggested paths, never audible
     selectedIds: new Set(),    // multi-selection
+    selectedRouteId: null,     // routes are selected one at a time, separately from sound areas
     albumArt: null,            // { name, blob, url } | null
     introAudio: null,          // walk-level intro clip filename (in audioStore), or null
     introGain: 1.0,            // 0..1 playback level for the intro clip
@@ -32,13 +34,53 @@
     exitGain: 1.0,             // 0..1 playback level for the exit clip
     listenSpeed: "walking",    // "walking" | "running" | "teleport"
     dialogueColors: null,      // per-walk dialogue state colors (set below)
+    displayStyle: "classic",   // "classic" | "fuzzy" — how areas are drawn for listeners
   };
   // metres / second — walk, run, bike (~24 km/h), drive (~48 km/h). Teleport is instant.
   const LISTEN_SPEED = { walking: 1.4, running: 3.5, biking: 6.7, driving: 13.4 };
 
+  // "fuzzy" drops the outline entirely and feathers an area's edge outward over a band this
+  // fraction of its size; a polygon also takes a round-jointed stroke, which is what rounds its
+  // corners into a blob. Only ever drawn in Listen mode — Edit mode has to stay crisp, since you
+  // can't grab a vertex handle on a blurred shape.
+  const FUZZ_BAND = 0.08;
+  function fuzzyOn() { return state.displayStyle === "fuzzy" && state.mode === "listen"; }
+  // Half the shape's smaller on-screen dimension, i.e. a radius in pixels at the current zoom.
+  function shapePixelSize(shape) {
+    const layer = shape.layer; if (!layer) return 0;
+    if (shape.type === "circle") return layer._radius || 0;
+    const b = layer.getBounds();
+    const nw = map.latLngToLayerPoint(b.getNorthWest()), se = map.latLngToLayerPoint(b.getSouthEast());
+    return Math.min(Math.abs(se.x - nw.x), Math.abs(se.y - nw.y)) / 2;
+  }
+  // The stroke exists only to round a polygon's corners, so it matches the fill exactly; the blur
+  // does the actual feathering and is applied to the path element in applyFuzz.
+  function withFuzz(shape, style) {
+    // Classic has to put the stroke's alpha back explicitly. Leaflet keeps whatever was last set,
+    // so a layer that has been fuzzy would otherwise keep its faded outline and read as thin-lined.
+    if (!fuzzyOn()) return { opacity: 1, ...style };
+    const fill = style.fillColor || style.color || shape.color;
+    const op = style.fillOpacity ?? 0.25;
+    return { ...style, color: fill, fillColor: fill, opacity: op,
+             weight: shape.type === "polygon" ? Math.max(1, FUZZ_BAND * shapePixelSize(shape) * 0.6) : 0 };
+  }
+  function applyFuzz(shape) {
+    const path = shape.layer && shape.layer._path; if (!path) return;
+    const size = fuzzyOn() ? shapePixelSize(shape) : 0;
+    path.style.filter = size > 4 ? `blur(${(FUZZ_BAND * size / 2).toFixed(2)}px)` : "";
+  }
+  function applyFuzzAll() { for (const s of state.shapes) applyFuzz(s); }
+
   // Fixed color per shape type so the map reads consistently: circles red, polygons blue.
   // (Individual shapes can still be recolored via the swatch.)
   const SHAPE_COLORS = { circle: "#e6194b", polygon: "#4363d8" };
+
+  // Suggested routes are drawn, never heard. Each carries its own colour and thickness, so the
+  // defaults here only seed a freshly drawn one.
+  const DEFAULT_ROUTE_COLOR = "#111111";
+  const DEFAULT_ROUTE_WIDTH = 6;
+  const ROUTE_WIDTH_RANGE = [2, 16];
+  let routeCounter = 0;
 
   // Dialogue shapes aren't colored individually — they show their playback state instead, using
   // this per-walk palette (authored in the Details tab, saved in map.json). One dialogue plays at a
@@ -67,10 +109,19 @@
   const mapEl = $("map");
 
   // ----------------------------------------------------------------- map ----
+  // CARTO Positron, greyed by CSS (.leaflet-tile-pane) so authored areas are the only colour.
+  // The key became mandatory in Aug 2026 — without it CARTO stamps "API KEY REQUIRED" across every
+  // tile. It is a *public* key by nature (it rides in every tile URL, visible to anyone who loads
+  // the map), so restrict it by domain in the CARTO dashboard rather than treating it as a secret.
+  // Keep in step with web/listen/player.js and ios/Songitude/Songitude/Views/MapOverlayView.swift.
+  const CARTO_KEY = "cb1_2log_1_19551f9fb4c0fbe576aadb40";
+  const BASEMAP_URL =
+    "https://basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}{r}.png?key=" + CARTO_KEY;
+
   const map = L.map(mapEl, { zoomControl: true }).setView(state.center, state.zoom);
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+  L.tileLayer(BASEMAP_URL, {
     attribution: '&copy; OpenStreetMap &copy; CARTO',
-    subdomains: "abcd", maxZoom: 20,
+    maxZoom: 20,
   }).addTo(map);
 
   // ============================================================ SHAPE MODEL ==
@@ -90,6 +141,8 @@
       loopMode: "simple",            // loop only: "simple" | "crossfade"
       crossfade: 1.0,                // seconds; overlap for crossfade loops
       falloff: "none",               // circle loops: "none" | "linear" | "exponential" | "edge"
+      solo: false,                   // inside this area, non-soloed areas duck to silence
+      hidden: false,                 // audible, but never drawn for listeners (edit mode still shows it)
       layer: null,
       _rt: null,                     // listen-mode runtime, see engine
       ...geom,                       // circle: {center:[lat,lng], radius} | polygon: {points:[[lat,lng]...]}
@@ -115,7 +168,10 @@
   function buildLayer(shape) {
     if (shape.layer) { map.removeLayer(shape.layer); shape.layer = null; }
     const b = baseStyle(shape);
-    const style = { color: b.color, weight: 2, fillColor: b.color, fillOpacity: b.fillOpacity };
+    const style = { color: b.color, weight: 2, fillColor: b.color, fillOpacity: b.fillOpacity,
+                    // A dashed outline is the author's only cue that this area won't be drawn for
+                    // a listener — in Edit mode it looks otherwise identical to a normal one.
+                    dashArray: shape.hidden ? "6 5" : null };
     let layer;
     if (shape.type === "circle") {
       layer = L.circle(shape.center, { radius: shape.radius, ...style });
@@ -129,26 +185,207 @@
       L.DomEvent.stop(e);
       startShapeDrag(shape, e);
     });
-    layer.addTo(map);
+    // Listen mode previews what the listener sees, so a hidden area is never put on the map there.
+    if (state.mode !== "listen" || !shape.hidden) layer.addTo(map);
     shape.layer = layer;
+    if (fuzzyOn()) { layer.setStyle(withFuzz(shape, style)); applyFuzz(shape); }
   }
 
   function shapeById(id) { return state.shapes.find((s) => s.id === id); }
 
+  // ============================================================ ROUTE MODEL ==
+  // A suggested route is a purely visual path laid over the map: an open polyline with a marker at
+  // each end, optionally labelled. It has no audio, no containment test and no bearing on playback
+  // of any kind — the only thing it does is show a listener where the walk means them to go. Every
+  // reader treats it as optional, so a bundle without routes behaves exactly as it always did.
+  function routeById(id) { return state.routes.find((r) => r.id === id); }
+
+  function makeRoute(points) {
+    routeCounter += 1;
+    const route = {
+      id: "r_" + Math.abs(hashStr("route" + routeCounter + points.length)).toString(36),
+      name: `Route ${routeCounter}`,
+      points,                              // [[lat,lng], ...] in walking order; at least 2
+      color: DEFAULT_ROUTE_COLOR,
+      width: DEFAULT_ROUTE_WIDTH,
+      startLabel: "",                      // "" ⇒ a plain endpoint marker with no text
+      endLabel: "",
+      layer: null,
+      markers: null,
+    };
+    buildRouteLayer(route);
+    state.routes.push(route);
+    return route;
+  }
+
+  function destroyRouteLayer(r) {
+    if (r.layer) { map.removeLayer(r.layer); r.layer = null; }
+    if (r.markers) {
+      map.removeLayer(r.markers.start);
+      map.removeLayer(r.markers.end);
+      r.markers = null;
+    }
+  }
+
+  /// Round caps and joins are native to Leaflet's SVG renderer (stroke-linecap / stroke-linejoin),
+  /// so a route bends smoothly on its own — no need to fake the curve out of rectangles and dots.
+  function buildRouteLayer(r) {
+    destroyRouteLayer(r);
+    r.layer = L.polyline(r.points, routeStyle(r)).addTo(map);
+    r.layer.on("mousedown", (e) => {
+      if (state.mode !== "edit" || state.tool !== "select") return;
+      L.DomEvent.stop(e);
+      startRouteDrag(r, e);
+    });
+    buildRouteMarkers(r);
+  }
+
+  function routeStyle(r) {
+    const sel = state.selectedRouteId === r.id;
+    return { color: r.color, weight: sel ? r.width + 3 : r.width, opacity: sel ? 1 : 0.9,
+             lineCap: "round", lineJoin: "round" };
+  }
+
+  /// The two endpoint markers: a solid dot in the route's own colour, sized off the line's width so
+  /// it reads as the end of the stroke rather than a badge stuck on it. A non-empty label rides
+  /// alongside. Non-interactive, so they never swallow a click meant for the line or a handle under
+  /// them. The icon's height is fixed in CSS, which is what lets iconAnchor keep the dot — not the
+  /// label — sitting on the point.
+  function routeEndDotSize(r) { return clamp(r.width || DEFAULT_ROUTE_WIDTH, 6, 14); }
+  function routeEndIcon(r, kind) {
+    const label = (kind === "start" ? r.startLabel : r.endLabel) || "";
+    const d = routeEndDotSize(r);
+    const dot = `<i style="background:${r.color};width:${d}px;height:${d}px"></i>`;
+    const text = label ? `<b style="color:${r.color}">${escapeHtml(label)}</b>` : "";
+    return L.divIcon({ className: "route-end route-end-" + kind, html: dot + text,
+                       iconSize: null, iconAnchor: [d / 2, 10] });
+  }
+  function buildRouteMarkers(r) {
+    if (r.points.length < 2) return;
+    const mk = (pt, kind) => L.marker(pt, { icon: routeEndIcon(r, kind), interactive: false,
+                                            keyboard: false, zIndexOffset: 900 }).addTo(map);
+    r.markers = { start: mk(r.points[0], "start"), end: mk(r.points[r.points.length - 1], "end") };
+  }
+  function refreshRouteMarkers(r) {
+    if (!r.markers) { buildRouteMarkers(r); return; }
+    r.markers.start.setLatLng(r.points[0]);
+    r.markers.start.setIcon(routeEndIcon(r, "start"));
+    r.markers.end.setLatLng(r.points[r.points.length - 1]);
+    r.markers.end.setIcon(routeEndIcon(r, "end"));
+  }
+  /// Re-style + re-seat a route in place, without tearing the layer down (which would drop the
+  /// handles' object identity mid-drag).
+  function refreshRoute(r) {
+    if (r.layer) { r.layer.setLatLngs(r.points); r.layer.setStyle(routeStyle(r)); }
+    refreshRouteMarkers(r);
+  }
+
+  function selectRoute(id) {
+    state.selectedIds.clear();
+    state.selectedRouteId = id;
+    applySelection();
+    renderRoutes();
+  }
+
+  function removeRoute(id) {
+    const r = routeById(id); if (!r) return;
+    destroyRouteLayer(r);
+    clearEditHandles();
+    state.routes = state.routes.filter((x) => x.id !== id);
+    if (state.selectedRouteId === id) state.selectedRouteId = null;
+  }
+
+  function deleteRoute(id) {
+    const r = routeById(id); if (!r) return;
+    if (!confirm(`Delete “${r.name}”?\n\nThis only removes the drawn path; no audio is affected.`)) return;
+    removeRoute(id);
+    renderRoutes();
+    applySelection();
+    commit();
+  }
+
+  /// Move a whole route with the pointer. A press that never moves is a click: on the route whose
+  /// handles are already up it drops a new point on the line, otherwise it selects the route.
+  function startRouteDrag(r, e) {
+    const press = e.latlng;
+    map.dragging.disable();
+    const startPt = map.latLngToContainerPoint(press);
+    let last = press, moved = false;
+    const onMove = (ev) => {
+      if (!moved && map.latLngToContainerPoint(ev.latlng).distanceTo(startPt) <= DRAG_SLOP_PX) return;
+      moved = true;
+      const dLat = ev.latlng.lat - last.lat, dLng = ev.latlng.lng - last.lng;
+      last = ev.latlng;
+      r.points = r.points.map(([la, ln]) => [la + dLat, ln + dLng]);
+      refreshRoute(r);
+      for (const h of editHandles) { const p = h.getLatLng(); h.setLatLng([p.lat + dLat, p.lng + dLng]); }
+    };
+    const onUp = () => {
+      map.off("mousemove", onMove);
+      map.dragging.enable();
+      if (moved) { commit(); return; }
+      if (maybeInsertVertex(r, "route", press)) return;
+      selectRoute(r.id);
+    };
+    map.on("mousemove", onMove);
+    map.once("mouseup", onUp);
+  }
+
+  function serializeRoute(r) {
+    return { id: r.id, name: r.name, points: r.points.map(([la, ln]) => [la, ln]),
+             color: r.color, width: r.width,
+             startLabel: r.startLabel || "", endLabel: r.endLabel || "" };
+  }
+
+  /// Rebuild every route from serialized form. Shared by import and undo/redo, so the two can't
+  /// drift apart the way parallel hand-written copies do.
+  function hydrateRoutes(list) {
+    state.routes.forEach(destroyRouteLayer);
+    state.routes = [];
+    routeCounter = 0;
+    for (const raw of list || []) {
+      if (!Array.isArray(raw.points) || raw.points.length < 2) continue;   // nothing to draw
+      routeCounter += 1;
+      const r = {
+        id: raw.id || ("r_" + routeCounter),
+        name: raw.name || `Route ${routeCounter}`,
+        points: raw.points.map((p) => [p[0], p[1]]),
+        color: raw.color || DEFAULT_ROUTE_COLOR,
+        width: raw.width ?? DEFAULT_ROUTE_WIDTH,
+        startLabel: raw.startLabel || "",
+        endLabel: raw.endLabel || "",
+        layer: null, markers: null,
+      };
+      buildRouteLayer(r);
+      state.routes.push(r);
+    }
+  }
+
   // ---- selection (multi) ------------------------------------------------
-  function selectOnly(id) { state.selectedIds = new Set([id]); applySelection(); scrollToCard(id); }
+  // Sound areas and routes share one set of drag handles, so selecting either clears the other.
+  function selectOnly(id) { state.selectedRouteId = null; state.selectedIds = new Set([id]); applySelection(); scrollToCard(id); }
   function toggleSelection(id) {
+    state.selectedRouteId = null;
     if (state.selectedIds.has(id)) state.selectedIds.delete(id); else state.selectedIds.add(id);
     applySelection();
   }
-  function setSelection(ids) { state.selectedIds = new Set(ids); applySelection(); }
-  function clearSelection() { if (state.selectedIds.size) { state.selectedIds.clear(); applySelection(); } }
+  function setSelection(ids) { state.selectedRouteId = null; state.selectedIds = new Set(ids); applySelection(); }
+  function clearSelection() {
+    if (!state.selectedIds.size && !state.selectedRouteId) return;
+    state.selectedIds.clear();
+    state.selectedRouteId = null;
+    applySelection();
+    renderRoutes();
+  }
 
   function applySelection() {
     // Update card highlight + shape outline in place (no DOM rebuild → keeps input focus).
     document.querySelectorAll(".card").forEach((c) =>
       c.classList.toggle("selected", state.selectedIds.has(c.dataset.id)));
     for (const s of state.shapes) if (s.layer) s.layer.setStyle({ weight: state.selectedIds.has(s.id) ? 4 : 2 });
+    for (const r of state.routes) if (r.layer) r.layer.setStyle(routeStyle(r));
+    document.querySelectorAll(".route-card").forEach((c) =>
+      c.classList.toggle("selected", c.dataset.id === state.selectedRouteId));
     updateBulkBar();
     refreshEditHandles();
   }
@@ -167,6 +404,10 @@
     const s = shapeById(id); if (!s) return;
     engine.stopShape(s);
     if (s.layer) map.removeLayer(s.layer);
+    // The drag handles are their own map layers, not children of s.layer — without this the
+    // deleted shape's vertex/centre grips stay stranded on the map. applySelection() in the
+    // callers puts them back on whatever is still selected.
+    clearEditHandles();
     state.shapes = state.shapes.filter((x) => x.id !== id);
     state.selectedIds.delete(id);
   }
@@ -175,6 +416,7 @@
     if (!confirm(`Delete “${s.name}”?\n\nThis removes the sound area and its audio assignment.`)) return;
     removeShape(id);
     renderSide();
+    applySelection();
     commit();
   }
   function bulkDelete() {
@@ -187,6 +429,7 @@
     ids.forEach(removeShape);
     state.selectedIds.clear();
     renderSide();
+    applySelection();
     commit();
   }
 
@@ -206,6 +449,11 @@
     return L.latLng(s.points.reduce((a, p) => a + p[0], 0) / n,
                     s.points.reduce((a, p) => a + p[1], 0) / n);
   }
+  // How far the pointer may wander between press and release and still count as a click. Measured in
+  // screen pixels: a threshold in degrees is meaningless, since the same hand movement is a whole
+  // continent at one zoom and a doorway at another.
+  const DRAG_SLOP_PX = 4;
+
   // Drag a shape (or, if it's part of a multi-selection, the whole group).
   function startShapeDrag(shape, e) {
     const oe = e.originalEvent || {};
@@ -213,10 +461,15 @@
       ? [...state.selectedIds].map(shapeById).filter(Boolean)
       : [shape];
     map.dragging.disable();
+    const startPt = map.latLngToContainerPoint(e.latlng);
     let last = e.latlng, moved = false;
     const onMove = (ev) => {
+      // Inside the slop nothing moves at all — otherwise a click meant to drop a point would also
+      // nudge the whole outline by however much the hand shook.
+      if (!moved && map.latLngToContainerPoint(ev.latlng).distanceTo(startPt) <= DRAG_SLOP_PX) return;
+      moved = true;
+      // `last` is still the press point on the first real move, so nothing is lost crossing the slop.
       const dLat = ev.latlng.lat - last.lat, dLng = ev.latlng.lng - last.lng;
-      if (Math.abs(dLat) > 1e-12 || Math.abs(dLng) > 1e-12) moved = true;
       last = ev.latlng;
       for (const s of group) translateShape(s, dLat, dLng);
       for (const h of editHandles) { const p = h.getLatLng(); h.setLatLng([p.lat + dLat, p.lng + dLng]); }
@@ -224,7 +477,8 @@
     const onUp = () => {
       map.off("mousemove", onMove);
       map.dragging.enable();
-      if (!moved) { // a click, not a drag → (de)select
+      if (!moved) { // a click, not a drag → add a point on the edge, else (de)select
+        if (maybeInsertVertex(shape, "shape", e.latlng)) return;
         if (oe.shiftKey || oe.metaKey || oe.ctrlKey) toggleSelection(shape.id);
         else selectOnly(shape.id);
       } else {
@@ -237,7 +491,10 @@
 
   // ---- vertex / radius editing handles (single selection) ---------------
   let editHandles = [];
+  // The vertex the pointer last touched. Delete removes it and joins its neighbours up.
+  let activeVertex = null;
   function clearEditHandles() {
+    activeVertex = null;
     if (!editHandles.length) return;
     editHandles.forEach((h) => map.removeLayer(h));
     editHandles = [];
@@ -264,19 +521,104 @@
   // plus a grip on its perimeter (random bearing) that sets the radius.
   function refreshEditHandles() {
     clearEditHandles();
-    if (state.mode !== "edit" || draw || state.selectedIds.size !== 1) return;
+    if (state.mode !== "edit" || draw) return;
+    // Pan mode leaves nothing on the map to catch a drag; the selection itself is kept, so the
+    // handles come straight back on the way out of it.
+    if (state.tool === "pan") return;
+    if (state.selectedRouteId) {
+      const r = routeById(state.selectedRouteId);
+      if (r && r.layer) buildVertexHandles(r, "route");
+      return;
+    }
+    if (state.selectedIds.size !== 1) return;
     const s = shapeById([...state.selectedIds][0]);
     if (!s || !s.layer) return;
-    if (s.type === "polygon") buildPolygonHandles(s);
+    if (s.type === "polygon") buildVertexHandles(s, "shape");
     else if (s.type === "circle") buildCircleHandles(s);
   }
-  function buildPolygonHandles(s) {
-    s.points.forEach((pt, i) => {
-      const h = newHandle(pt, "vertex", s.color);
-      h.on("drag", () => { const ll = h.getLatLng(); s.points[i] = [ll.lat, ll.lng]; s.layer.setLatLngs(s.points); });
+
+  // Polygons and routes both keep their outline in `points`, so one set of handles serves both.
+  function buildVertexHandles(obj, kind) {
+    obj.points.forEach((pt, i) => {
+      const h = newHandle(pt, "vertex", obj.color);
+      h.on("mousedown", () => { activeVertex = { obj, kind, index: i }; });
+      h.on("drag", () => {
+        const ll = h.getLatLng();
+        obj.points[i] = [ll.lat, ll.lng];
+        if (kind === "route") refreshRoute(obj);
+        else if (obj.layer) obj.layer.setLatLngs(obj.points);
+      });
       h.on("dragend", () => commit());
       editHandles.push(h);
     });
+  }
+
+  // ---- adding and removing points on an existing outline ----------------
+  const EDGE_HIT_PX = 12;   // how near the line a click has to land to count as "on the edge"
+
+  /// The segment of `points` nearest `latlng`, measured in screen pixels so the tolerance feels the
+  /// same at every zoom. `closed` wraps the last point back to the first (polygons); routes are open.
+  /// Returns null when nothing is within `maxPx`.
+  function nearestSegment(points, latlng, maxPx, closed) {
+    if (!points || points.length < 2) return null;
+    const p = map.latLngToContainerPoint(latlng);
+    const n = points.length;
+    const segs = closed ? n : n - 1;
+    let best = null;
+    for (let i = 0; i < segs; i++) {
+      const a = map.latLngToContainerPoint(points[i]);
+      const b = map.latLngToContainerPoint(points[(i + 1) % n]);
+      const proj = L.LineUtil.closestPointOnSegment(p, a, b);
+      const d = p.distanceTo(proj);
+      if (!best || d < best.d) best = { d, index: i, point: map.containerPointToLatLng(proj) };
+    }
+    return best && best.d <= maxPx ? best : null;
+  }
+
+  /// Split the segment after `index` by dropping a new vertex on it.
+  function insertVertex(obj, kind, index, latlng) {
+    obj.points.splice(index + 1, 0, [latlng.lat, latlng.lng]);
+    if (kind === "route") refreshRoute(obj);
+    else if (obj.layer) obj.layer.setLatLngs(obj.points);
+    refreshEditHandles();
+    commit();
+    toast("Point added — drag it to shape the line.", "ok");
+  }
+
+  /// A click (not a drag) on an object whose handles are showing, landing close to its outline,
+  /// adds a point there rather than re-selecting. Returns true when it consumed the click — which
+  /// is why the interior of a polygon still selects and drags exactly as before.
+  function maybeInsertVertex(obj, kind, latlng) {
+    const handlesUp = kind === "route"
+      ? state.selectedRouteId === obj.id
+      : state.selectedIds.size === 1 && state.selectedIds.has(obj.id);
+    if (!handlesUp) return false;
+    if (kind !== "route" && obj.type !== "polygon") return false;   // a circle has no vertices
+    const hit = nearestSegment(obj.points, latlng, EDGE_HIT_PX, kind !== "route");
+    if (!hit) return false;
+    insertVertex(obj, kind, hit.index, hit.point);
+    return true;
+  }
+
+  /// Delete on a vertex removes it and the two points either side simply join up. A polygon needs
+  /// three points and a route needs two, so below that we refuse rather than quietly destroying
+  /// the object out from under the author.
+  function deleteActiveVertex() {
+    if (!activeVertex) return false;
+    const { obj, kind, index } = activeVertex;
+    const min = kind === "route" ? 2 : 3;
+    if (obj.points.length <= min) {
+      toast(kind === "route" ? "A route needs at least two points."
+                             : "A polygon needs at least three points.", "err");
+      return true;
+    }
+    obj.points.splice(index, 1);
+    if (kind === "route") refreshRoute(obj);
+    else if (obj.layer) obj.layer.setLatLngs(obj.points);
+    refreshEditHandles();          // also clears activeVertex; indices below it have shifted
+    commit();
+    toast("Point removed.", "ok");
+    return true;
   }
   function buildCircleHandles(s) {
     const ctr = newHandle(s.center, "center", s.color);
@@ -322,15 +664,19 @@
   function setTool(tool) {
     cancelDraw();
     state.tool = tool;
-    ["Select", "Polygon", "Circle"].forEach((t) =>
+    ["Select", "Pan", "Polygon", "Circle", "Route"].forEach((t) =>
       $("tool" + t).classList.toggle("active", tool === t.toLowerCase()));
+    // Kept short: the hint shares one row with the tool buttons, and a long one squeezes them.
     const hints = {
       select: "",
-      polygon: "Click to drop each vertex. Click the first point to close. Backspace undoes the last point.",
-      circle: "Click to set the center, then click again to set the radius.",
+      pan: "Drag to move the map.",
+      polygon: "Click each vertex; click the first to close.",
+      circle: "Click the center, then the edge.",
+      route: "Click each point; Enter to finish.",
     };
     $("toolHint").textContent = hints[tool];
-    mapEl.style.cursor = tool === "select" ? "" : "crosshair";
+    mapEl.style.cursor = tool === "select" ? "" : tool === "pan" ? "grab" : "crosshair";
+    mapEl.classList.toggle("pan-mode", tool === "pan");
     refreshEditHandles();
   }
 
@@ -342,10 +688,12 @@
     draw = null;
   }
 
+  map.on("zoomend", applyFuzzAll);
   map.on("click", (e) => {
     if (state.mode === "listen") { placeListener(e.latlng); return; }
     if (state.tool === "polygon") polygonClick(e.latlng);
     else if (state.tool === "circle") circleClick(e.latlng);
+    else if (state.tool === "route") routeClick(e.latlng);
     else if (state.tool === "select") {
       // Plain click on empty map clears the selection; Shift-click leaves it (used with marquee).
       if (!(e.originalEvent && e.originalEvent.shiftKey)) clearSelection();
@@ -375,7 +723,7 @@
 
   map.on("mousemove", (e) => {
     if (state.mode !== "edit" || !draw) return;
-    if (draw.kind === "polygon" && draw.points.length) {
+    if ((draw.kind === "polygon" || draw.kind === "route") && draw.points.length) {
       const pts = draw.points.concat([e.latlng]);
       if (draw.rubber) draw.rubber.setLatLngs(pts);
     } else if (draw.kind === "circle" && draw.center) {
@@ -385,6 +733,9 @@
   });
 
   document.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && draw && draw.kind === "route" && draw.points.length >= 2) {
+      e.preventDefault(); finishRoute(); return;
+    }
     if (e.key !== "Escape") return;
     closeColorPopover();
     if (draw) setTool("select");   // fully exit an in-progress circle/polygon (bail on accidental draws)
@@ -408,9 +759,9 @@
     draw.rubber.setLatLngs(draw.points);
   }
 
-  // Backspace while placing a polygon: pop the most recent vertex off the in-progress stack.
+  // Backspace while placing a polygon or a route: pop the most recent vertex off the stack.
   function undoLastPolygonPoint() {
-    if (!draw || draw.kind !== "polygon" || !draw.points.length) return;
+    if (!draw || (draw.kind !== "polygon" && draw.kind !== "route") || !draw.points.length) return;
     draw.points.pop();
     const vtx = draw.temp.pop();
     if (vtx) map.removeLayer(vtx);
@@ -435,6 +786,39 @@
     selectOnly(s.id);   // stay in polygon mode so you can keep drawing
     commit();
     toast("Polygon added — drop an audio file on its card.", "ok");
+  }
+
+  function routeClick(latlng) {
+    if (!draw) {
+      clearEditHandles();
+      draw = { kind: "route", points: [], temp: [], rubber: null };
+      draw.rubber = L.polyline([], { color: DEFAULT_ROUTE_COLOR, weight: DEFAULT_ROUTE_WIDTH,
+                                     opacity: 0.65, lineCap: "round", lineJoin: "round",
+                                     dashArray: "10,10" }).addTo(map);
+    }
+    // A route is open, so there is no first point to close onto — clicking the *last* point again
+    // is what ends it (Enter does the same).
+    if (draw.points.length >= 2) {
+      const pl = map.latLngToContainerPoint(draw.points[draw.points.length - 1]);
+      if (pl.distanceTo(map.latLngToContainerPoint(latlng)) < 14) { finishRoute(); return; }
+    }
+    draw.points.push(latlng);
+    const vtx = L.circleMarker(latlng, { radius: 4, color: DEFAULT_ROUTE_COLOR,
+                                         fillColor: "#fff", fillOpacity: 1 }).addTo(map);
+    draw.temp.push(vtx);
+    draw.rubber.setLatLngs(draw.points);
+  }
+
+  function finishRoute() {
+    const points = draw.points.map((ll) => [ll.lat, ll.lng]);
+    cancelDraw();
+    if (points.length < 2) return;     // a single click isn't a path
+    const r = makeRoute(points);
+    renderRoutes();
+    switchTab("routes");
+    selectRoute(r.id);
+    commit();
+    toast("Route added — set its colour, thickness and end labels on the Routes tab.", "ok");
   }
 
   function circleClick(latlng) {
@@ -466,6 +850,88 @@
     for (const s of state.shapes) list.appendChild(cardFor(s));
     reflectSounding();
     updateBulkBar();
+  }
+
+  // ---- routes panel ------------------------------------------------------
+  function renderRoutes() {
+    const list = $("routeList");
+    list.innerHTML = "";
+    $("routeCount").textContent = state.routes.length;
+    $("routeEmpty").hidden = state.routes.length > 0;
+    for (const r of state.routes) list.appendChild(cardForRoute(r));
+  }
+
+  function cardForRoute(r) {
+    const card = el("div", "card route-card");
+    card.dataset.id = r.id;
+    if (state.selectedRouteId === r.id) card.classList.add("selected");
+    card.onclick = () => selectRoute(r.id);
+
+    const head = el("div", "card-head");
+    const name = document.createElement("input");
+    name.className = "name"; name.type = "text"; name.value = r.name;
+    name.onclick = (e) => e.stopPropagation();
+    name.oninput = () => { r.name = name.value; };
+    name.onchange = () => commit();
+    const del = el("button", "del", "✕");
+    del.title = "Delete this route";
+    del.onclick = (e) => { e.stopPropagation(); deleteRoute(r.id); };
+    head.append(name, del);
+    card.append(head);
+
+    // colour + thickness
+    const style = el("div", "params");
+    const colorLab = el("label", null, "Colour ");
+    const color = document.createElement("input");
+    color.type = "color"; color.value = r.color;
+    color.onclick = (e) => e.stopPropagation();
+    color.oninput = (e) => { e.stopPropagation(); r.color = color.value.toLowerCase(); refreshRoute(r); };
+    color.onchange = (e) => { e.stopPropagation(); commit(); };
+    colorLab.append(color);
+
+    const widthLab = el("label", null, "Thickness ");
+    const width = document.createElement("input");
+    width.type = "range";
+    width.min = ROUTE_WIDTH_RANGE[0]; width.max = ROUTE_WIDTH_RANGE[1]; width.step = 1;
+    width.value = r.width;
+    const widthVal = el("span", null, r.width + " px");
+    width.onclick = (e) => e.stopPropagation();
+    width.oninput = (e) => {
+      e.stopPropagation();
+      r.width = parseInt(width.value, 10);
+      widthVal.textContent = r.width + " px";
+      refreshRoute(r);
+    };
+    width.onchange = (e) => { e.stopPropagation(); commit(); };
+    widthLab.append(width, widthVal);
+    style.append(colorLab, widthLab);
+    card.append(style);
+
+    // endpoint labels — leaving one empty gives a plain marker with no text
+    const labels = el("div", "params");
+    for (const [key, placeholder] of [["startLabel", "Start label"], ["endLabel", "End label"]]) {
+      const lab = el("label", null, key === "startLabel" ? "Start " : "End ");
+      const inp = document.createElement("input");
+      inp.type = "text"; inp.className = "route-label-input";
+      inp.value = r[key] || ""; inp.placeholder = placeholder; inp.maxLength = 40;
+      inp.onclick = (e) => e.stopPropagation();
+      inp.oninput = () => { r[key] = inp.value; refreshRouteMarkers(r); };
+      inp.onchange = () => commit();
+      lab.append(inp);
+      labels.append(lab);
+    }
+    card.append(labels);
+    card.append(el("span", "field-hint",
+      "Leave a label empty for a plain marker. Click the line while this route is selected to add "
+      + "a point; select a point and press Delete to remove it."));
+
+    const actions = el("div", "shape-actions");
+    const editBtn = el("button", "edit-btn", "✎ Edit points");
+    editBtn.title = "Show draggable handles for this route's points";
+    editBtn.onclick = (e) => { e.stopPropagation(); selectRoute(r.id); toast("Drag the handles to reshape the route.", "ok"); };
+    actions.append(editBtn);
+    card.append(actions);
+    return card;
   }
 
   // ---- color picker popover (8 presets + custom RGB) -------------------
@@ -685,6 +1151,42 @@
       card.append(row);
     }
 
+    // solo + hidden: two per-shape flags that apply to circles and polygons alike
+    {
+      const row = el("div", "params");
+      const soloLab = el("label", "check-inline");
+      const solo = document.createElement("input");
+      solo.type = "checkbox"; solo.checked = !!s.solo;
+      solo.onclick = (e) => e.stopPropagation();
+      solo.onchange = (e) => {
+        e.stopPropagation();
+        s.solo = solo.checked;
+        if (state.mode === "listen" && engine.listener) engine.setListener(engine.listener);
+        commit();
+      };
+      soloLab.title = "While the listener is inside this area, every other area they're inside "
+                    + "ducks to silence. Overlapping soloed areas still play together.";
+      soloLab.append(solo, el("span", null, " Solo"));
+
+      const hideLab = el("label", "check-inline");
+      const hide = document.createElement("input");
+      hide.type = "checkbox"; hide.checked = !!s.hidden;
+      hide.onclick = (e) => e.stopPropagation();
+      hide.onchange = (e) => {
+        e.stopPropagation();
+        s.hidden = hide.checked;
+        if (s.layer) s.layer.setStyle({ dashArray: s.hidden ? "6 5" : null });
+        applyShapeVisibility();
+        commit();
+      };
+      hideLab.title = "Keep the sound, drop the drawing: this area is never shown to a listener "
+                    + "in the app or the web player. It stays visible here in Edit mode.";
+      hideLab.append(hide, el("span", null, " Hide from listener"));
+
+      row.append(soloLab, hideLab);
+      card.append(row);
+    }
+
     // shape-editing actions: drag-handles (all shapes) + polygon redraw
     const actions = el("div", "shape-actions");
     const editBtn = el("button", "edit-btn", "✎ Edit shape");
@@ -879,6 +1381,12 @@
     outroActive: false,      // the exit sequence is running — freeze location-driven playback
     _introVoice: null,
     _exitVoice: null,
+    _soloOn: false,          // the listener is standing inside at least one soloed area
+
+    // 1 normally; 0 while a solo elsewhere is ducking this shape. Applied to every mode alike —
+    // a ducked voice keeps running at zero rather than stopping, so it returns where it would have
+    // been (a dialogue picks up mid-line instead of restarting).
+    _duck(s) { return (this._soloOn && !s.solo) ? 0 : 1; },
 
     async setListener(latlng) {
       this.listener = latlng;
@@ -886,6 +1394,7 @@
       const ctx = audioCtx();
       const insideIds = new Set();
       for (const s of state.shapes) if (contains(s, latlng)) insideIds.add(s.id);
+      this._soloOn = state.shapes.some((s) => s.solo && insideIds.has(s.id));
 
       // ensure buffers for anything we might start
       await Promise.all(state.shapes
@@ -897,16 +1406,24 @@
         const rt = s._rt;
         const nowIn = insideIds.has(s.id);
         const rising = nowIn && !rt.inside;
+        // A solo that just switched on or off has to move voices that otherwise only set their
+        // gain once (one-shots, dialogue) or that hold a constant level (loops with no falloff).
+        const duck = this._duck(s);
+        const duckChanged = rt.duck !== undefined && rt.duck !== duck;
+        // Ducking uses the ducked shape's own fades, so it sounds like leaving/re-entering it.
+        const duckDur = duck ? Math.max(0.02, s.fadeIn) : Math.max(0.02, s.fadeOut);
+        rt.duck = duck;
 
         if (s.mode === "loop") {
           if (nowIn && !rt.source) this._startLoop(s, latlng);
-          else if (nowIn && rt.source) this._updateLoopGain(s, latlng); // proximity falloff
+          else if (nowIn && rt.source) this._updateLoopGain(s, latlng, duckChanged, duckDur);
           else if (!nowIn && rt.source) this._stopLoop(s);
         } else if (s.mode === "syncedLoop") {
           // Already running in sync (started on listen entry); only gate its volume.
           if (rt.source) {
             const target = nowIn ? this._targetGain(s, latlng) : 0;
-            const dur = (nowIn && !rt.inside) ? Math.max(0.02, s.fadeIn)
+            const dur = duckChanged ? duckDur
+                      : (nowIn && !rt.inside) ? Math.max(0.02, s.fadeIn)
                       : (!nowIn && rt.inside) ? Math.max(0.02, s.fadeOut) : 0.12;
             const ctx = audioCtx(), t = ctx.currentTime;
             rt.gain.gain.cancelScheduledValues(t);
@@ -916,25 +1433,35 @@
         } else if (s.mode === "oneshot") {
           if (rising && rt.armed) { this._playOnce(s); rt.armed = false; }
           if (!nowIn) rt.armed = true;
+          if (duckChanged && rt.gain) this._rampTo(rt.gain, s.gain * duck, duckDur);
         } else { // dialogue: play once ever; queue behind any dialogue already playing
           if (rising && rt.dstate === "unplayed") {
             rt.dstate = "queued";
             this.dialogueQueue.push(s.id);
             this._advanceDialogue();
           }
+          if (duckChanged && rt.gain) this._rampTo(rt.gain, s.gain * duck, duckDur);
         }
         rt.inside = nowIn;
       }
       reflectSounding();
     },
 
-    // Target linear gain at a point: the shape gain, scaled by proximity falloff for circles.
+    // Target linear gain at a point: the shape gain, scaled by proximity falloff for circles and
+    // by any solo ducking in force.
     _targetGain(s, latlng) {
       if (s.type === "circle" && (s.falloff && s.falloff !== "none")) {
         const d = map.distance(L.latLng(s.center[0], s.center[1]), latlng);
-        return s.gain * falloffLevel(s.falloff, d / s.radius);
+        return s.gain * falloffLevel(s.falloff, d / s.radius) * this._duck(s);
       }
-      return s.gain;
+      return s.gain * this._duck(s);
+    },
+
+    _rampTo(g, target, dur) {
+      const ctx = audioCtx(), t = ctx.currentTime;
+      g.gain.cancelScheduledValues(t);
+      g.gain.setValueAtTime(g.gain.value, t);
+      g.gain.linearRampToValueAtTime(Math.max(0.0001, target), t + Math.max(0.01, dur));
     },
 
     _startLoop(s, latlng) {
@@ -978,13 +1505,12 @@
     },
 
     // Continuously track proximity gain as the listener moves inside a circle.
-    _updateLoopGain(s, latlng) {
+    _updateLoopGain(s, latlng, duckChanged, duckDur) {
       const rt = s._rt; if (!rt.gain) return;
-      if (!(s.type === "circle" && s.falloff && s.falloff !== "none")) return; // constant-gain loops: nothing to do
-      const ctx = audioCtx(); const t = ctx.currentTime;
-      rt.gain.gain.cancelScheduledValues(t);
-      rt.gain.gain.setValueAtTime(rt.gain.gain.value, t);
-      rt.gain.gain.linearRampToValueAtTime(Math.max(0.0001, this._targetGain(s, latlng)), t + 0.12);
+      const tracksProximity = s.type === "circle" && s.falloff && s.falloff !== "none";
+      // Constant-gain loops normally have nothing to do here — unless a solo just ducked them.
+      if (!tracksProximity && !duckChanged) return;
+      this._rampTo(rt.gain, this._targetGain(s, latlng), duckChanged ? duckDur : 0.12);
     },
 
     _stopLoop(s) {
@@ -1006,7 +1532,7 @@
       const src = ctx.createBufferSource();
       src.buffer = buf; src.loop = false;
       const g = ctx.createGain();
-      g.gain.setValueAtTime(s.gain, ctx.currentTime);
+      g.gain.setValueAtTime(Math.max(0.0001, s.gain * this._duck(s)), ctx.currentTime);
       src.connect(g).connect(ctx.destination);
       src.onended = () => { if (s._rt && s._rt.source === src) { s._rt.source = null; s._rt.gain = null; reflectSounding(); } };
       src.start();
@@ -1029,7 +1555,8 @@
       if (!buf) return this._onDialogueFinished(s);
       const ctx = audioCtx();
       const src = ctx.createBufferSource(); src.buffer = buf; src.loop = false;
-      const g = ctx.createGain(); g.gain.setValueAtTime(s.gain, ctx.currentTime);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(Math.max(0.0001, s.gain * this._duck(s)), ctx.currentTime);
       src.connect(g).connect(ctx.destination);
       src.onended = () => {
         if (s._rt && s._rt.source === src) { s._rt.source = null; s._rt.gain = null; this._onDialogueFinished(s); }
@@ -1114,7 +1641,11 @@
       if (this._introVoice) { try { this._introVoice.src.stop(); } catch (_) {} this._introVoice = null; }
       if (this._exitVoice) { try { this._exitVoice.src.stop(); } catch (_) {} this._exitVoice = null; }
       this.resetDialogue();
-      for (const s of state.shapes) { this.stopShape(s); if (s._rt) { s._rt.inside = false; s._rt.armed = true; s._rt.dstate = "unplayed"; } }
+      this._soloOn = false;
+      for (const s of state.shapes) {
+        this.stopShape(s);
+        if (s._rt) { s._rt.inside = false; s._rt.armed = true; s._rt.dstate = "unplayed"; s._rt.duck = undefined; }
+      }
       reflectSounding();
     },
   };
@@ -1171,6 +1702,19 @@
     moveRAF = requestAnimationFrame(stepMove);
   }
 
+  /// Add or remove each shape's layer to match who is meant to see it. Hidden areas are for the
+  /// author only: Edit mode always draws them (they'd be unselectable otherwise), Listen mode drops
+  /// them off the map entirely so the preview matches what a listener actually sees.
+  function applyShapeVisibility() {
+    for (const s of state.shapes) {
+      if (!s.layer) continue;
+      const show = state.mode !== "listen" || !s.hidden;
+      const on = map.hasLayer(s.layer);
+      if (show && !on) s.layer.addTo(map);
+      else if (!show && on) map.removeLayer(s.layer);
+    }
+  }
+
   function reflectSounding() {
     for (const s of state.shapes) {
       const g = s._rt && s._rt.gain;
@@ -1183,12 +1727,13 @@
         // Color by playback state; the currently-playing one also reads as sounding.
         const st = dialogueState(s);
         const col = dColor(st);
-        s.layer.setStyle({ color: col, fillColor: col, fillOpacity: DIALOGUE_STATE_OPACITY[st],
-                           weight: sel ? 4 : (st === "playing" ? 3 : 2) });
+        s.layer.setStyle(withFuzz(s, { color: col, fillColor: col, fillOpacity: DIALOGUE_STATE_OPACITY[st],
+                           weight: sel ? 4 : (st === "playing" ? 3 : 2) }));
       } else {
         const weight = sel ? 4 : (sounding ? 3 : 2);
-        s.layer.setStyle({ fillOpacity: sounding ? 0.5 : 0.25, weight });
+        s.layer.setStyle(withFuzz(s, { fillOpacity: sounding ? 0.5 : 0.25, weight }));
       }
+      applyFuzz(s);
     }
   }
 
@@ -1230,15 +1775,22 @@
       if (listenerMarker) { map.removeLayer(listenerMarker); listenerMarker = null; }
       $("listenerReadout").textContent = "No listener placed";
       setTool("select");
+      applyShapeVisibility();      // hidden areas come back for editing
       reflectSounding();           // reset dialogue shapes back to their "unplayed" color
     } else {
       cancelDraw();
       clearEditHandles();
+      // Nothing stays selected into Listen mode: selection is an authoring state, and leaving it up
+      // would keep a card highlighted and an area outlined heavily over a preview that is meant to
+      // look like what a listener sees. applySelection() inside here repaints the map, the cards
+      // and the selection bar together.
+      clearSelection();
       mapEl.style.cursor = "crosshair";
       audioCtx(); // unlock on user gesture
       engine.resetDialogue();
       for (const s of state.shapes) s._rt = { inside: false, armed: true, source: null, gain: null, dstate: "unplayed" };
       engine.startSyncedLoops();   // synced loops run from the moment you enter listen mode
+      applyShapeVisibility();      // hidden areas disappear, as they will for the listener
       reflectSounding();
     }
     updateListenActions();
@@ -1262,7 +1814,9 @@
       center: [map.getCenter().lat, map.getCenter().lng],
       zoom: map.getZoom(),
       dialogueColors: { ...state.dialogueColors },
+      displayStyle: state.displayStyle,
       shapes: state.shapes.map(serializeShape),
+      routes: state.routes.map(serializeRoute),
     };
   }
 
@@ -1326,7 +1880,8 @@
                    audioFile: s.audioFile, mode: s.mode, gain: s.gain,
                    fadeIn: s.fadeIn, fadeOut: s.fadeOut,
                    loopMode: s.loopMode || "simple", crossfade: s.crossfade ?? 1.0,
-                   falloff: s.falloff || "none" };
+                   falloff: s.falloff || "none",
+                   solo: !!s.solo, hidden: !!s.hidden };
     if (s.type === "circle") return { ...base, center: s.center, radius: s.radius };
     return { ...base, points: s.points };
   }
@@ -1340,6 +1895,9 @@
 
       // wipe current state
       state.shapes.forEach((s) => { engine.stopShape(s); if (s.layer) map.removeLayer(s.layer); });
+      clearEditHandles();     // grips outlive their shape's layer otherwise
+      state.routes.forEach(destroyRouteLayer);
+      state.routes = []; state.selectedRouteId = null;
       state.shapes = []; state.selectedIds.clear(); state.walkId = null;
       audioStore.forEach((r) => URL.revokeObjectURL(r.url));
       audioStore.clear(); decoded.clear();
@@ -1376,6 +1934,7 @@
       state.exitAudio = (bundle.exit && audioStore.has(bundle.exit)) ? bundle.exit : null;
       state.exitGain = bundle.exitGain ?? 1.0;
       state.dialogueColors = { ...DEFAULT_DIALOGUE_COLORS, ...(bundle.dialogueColors || {}) };
+      state.displayStyle = bundle.displayStyle === "fuzzy" ? "fuzzy" : "classic";
       syncDetailsInputs();
       if (Array.isArray(bundle.center)) map.setView(bundle.center, bundle.zoom || 15);
 
@@ -1391,12 +1950,15 @@
           gain: raw.gain ?? 1, fadeIn: raw.fadeIn ?? 2, fadeOut: raw.fadeOut ?? 3,
           loopMode: raw.loopMode || "simple", crossfade: raw.crossfade ?? 1.0,
           falloff: raw.falloff || "none",
+          solo: !!raw.solo, hidden: !!raw.hidden,
           layer: null, _rt: null, ...geom,
         };
         buildLayer(s);
         state.shapes.push(s);
       }
+      hydrateRoutes(bundle.routes);
       renderSide();
+      renderRoutes();
       setMode("edit");
       resetHistory();   // imported document is the new history baseline
       toast(`Imported “${state.name}” — ${state.shapes.length} area(s).`, "ok");
@@ -1453,6 +2015,10 @@
   }
 
   // =============================================================== HELPERS ===
+  function escapeHtml(v) {
+    return String(v).replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
   function el(tag, cls, text) {
     const e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -1492,8 +2058,11 @@
       exit: state.exitAudio || null,
       exitGain: state.exitGain,
       dialogueColors: { ...state.dialogueColors },
+      displayStyle: state.displayStyle,
       selected: [...state.selectedIds],
+      selectedRoute: state.selectedRouteId,
       shapes: state.shapes.map(serializeShape),
+      routes: state.routes.map(serializeRoute),
     });
   }
   function restoreSnapshot(json) {
@@ -1506,7 +2075,8 @@
                   audioFile: raw.audioFile || null, mode: raw.mode || "loop",
                   gain: raw.gain ?? 1, fadeIn: raw.fadeIn ?? 2, fadeOut: raw.fadeOut ?? 3,
                   loopMode: raw.loopMode || "simple", crossfade: raw.crossfade ?? 1.0,
-                  falloff: raw.falloff || "none", layer: null, _rt: null, ...geom };
+                  falloff: raw.falloff || "none", solo: !!raw.solo, hidden: !!raw.hidden,
+                  layer: null, _rt: null, ...geom };
       buildLayer(s);
       state.shapes.push(s);
     }
@@ -1520,13 +2090,17 @@
     state.exitAudio = (snap.exit && audioStore.has(snap.exit)) ? snap.exit : null;
     state.exitGain = snap.exitGain ?? 1.0;
     state.dialogueColors = { ...DEFAULT_DIALOGUE_COLORS, ...(snap.dialogueColors || {}) };
+    state.displayStyle = snap.displayStyle === "fuzzy" ? "fuzzy" : "classic";
     syncDetailsInputs();
     state.albumArt = (snap.albumArt && artStore.has(snap.albumArt))
       ? { name: snap.albumArt, blob: artStore.get(snap.albumArt).blob, url: artStore.get(snap.albumArt).url }
       : null;
     updateAlbumArtUI();
+    hydrateRoutes(snap.routes);
     state.selectedIds = new Set(snap.selected || []);
+    state.selectedRouteId = routeById(snap.selectedRoute) ? snap.selectedRoute : null;
     renderSide();
+    renderRoutes();
     applySelection();   // restore outline weights + editing handles for the selected shape
   }
   // Record a new history entry — call AFTER a change has been applied to state.
@@ -1622,11 +2196,12 @@
 
   // ---- side-panel tabs + details form ----------------------------------
   function switchTab(which) {
-    const areas = which === "areas";
-    $("tabBtnAreas").classList.toggle("active", areas);
-    $("tabBtnDetails").classList.toggle("active", !areas);
-    $("tabAreas").hidden = !areas;
-    $("tabDetails").hidden = areas;
+    for (const [name, btn, panel] of [["areas", "tabBtnAreas", "tabAreas"],
+                                      ["routes", "tabBtnRoutes", "tabRoutes"],
+                                      ["details", "tabBtnDetails", "tabDetails"]]) {
+      $(btn).classList.toggle("active", which === name);
+      $(panel).hidden = which !== name;
+    }
   }
   function introColorMode() {
     if (state.introColor === "artist") return "artist";
@@ -1643,6 +2218,7 @@
     $("mapIntroColorMode").value = mode;
     $("mapIntroColor").disabled = mode !== "custom";
     $("mapIntroColor").value = mode === "custom" ? state.introColor : DEFAULT_INTRO_COLOR;
+    $("mapDisplayStyle").value = state.displayStyle;
     $("dcUnplayed").value = dColor("unplayed");
     $("dcQueued").value = dColor("queued");
     $("dcPlaying").value = dColor("playing");
@@ -1661,6 +2237,8 @@
   $("toolSelect").onclick = () => setTool("select");
   $("toolPolygon").onclick = () => setTool("polygon");
   $("toolCircle").onclick = () => setTool("circle");
+  $("toolRoute").onclick = () => setTool("route");
+  $("toolPan").onclick = () => setTool("pan");
   $("selDelete").onclick = bulkDelete;
   $("selClear").onclick = clearSelection;
 
@@ -1670,9 +2248,12 @@
     const t = document.activeElement;
     if (t && /INPUT|TEXTAREA|SELECT/.test(t.tagName)) return;
     // While placing a polygon, Backspace removes the last dropped point (not the selected shape).
-    if (e.key === "Backspace" && draw && draw.kind === "polygon" && draw.points.length) {
+    if (e.key === "Backspace" && draw && (draw.kind === "polygon" || draw.kind === "route") && draw.points.length) {
       e.preventDefault(); undoLastPolygonPoint(); return;
     }
+    // A vertex under the pointer takes priority over deleting the whole shape.
+    if (state.mode === "edit" && activeVertex) { e.preventDefault(); deleteActiveVertex(); return; }
+    if (state.mode === "edit" && state.selectedRouteId) { e.preventDefault(); deleteRoute(state.selectedRouteId); return; }
     if (state.mode === "edit" && state.selectedIds.size) { e.preventDefault(); bulkDelete(); }
   });
 
@@ -1704,6 +2285,19 @@
   };
   $("mapIntroColor").oninput = (e) => { state.introColor = e.target.value.toLowerCase(); };
   $("mapIntroColor").onchange = () => commit();
+  $("mapDisplayStyle").onchange = (e) => {
+    state.displayStyle = e.target.value === "fuzzy" ? "fuzzy" : "classic";
+    // Only Listen mode draws the style, and rebuilding layers under Edit mode's drag handles would
+    // strand them — Edit picks the change up when you next switch over. Rebuild rather than restyle:
+    // switching styles changes the stroke as well as the blur, and a layer still carrying the other
+    // style's stroke would keep a ghost outline under it.
+    if (state.mode === "listen") {
+      for (const sh of state.shapes) buildLayer(sh);
+      applyShapeVisibility();
+      reflectSounding();
+    }
+    commit();
+  };
   // Per-walk dialogue state colors (Details tab). Recolor the map live; commit on release.
   for (const [key, id] of Object.entries({ unplayed: "dcUnplayed", queued: "dcQueued", playing: "dcPlaying", finished: "dcFinished" })) {
     $(id).oninput = (e) => {
@@ -1738,6 +2332,7 @@
     });
   };
   $("tabBtnAreas").onclick = () => switchTab("areas");
+  $("tabBtnRoutes").onclick = () => switchTab("routes");
   $("tabBtnDetails").onclick = () => switchTab("details");
   $("albumArtInput").onchange = (e) => { if (e.target.files[0]) { setAlbumArt(e.target.files[0]); commit(); } };
   $("albumArtThumb").onclick = (e) => e.stopPropagation();
@@ -1752,6 +2347,9 @@
     if (dirty && !confirm("Start a new soundwalk? Your unexported changes will be lost.")) return;
     closeMenu();
     state.shapes.forEach((s) => { engine.stopShape(s); if (s.layer) map.removeLayer(s.layer); });
+    clearEditHandles();       // grips outlive their shape's layer otherwise
+    state.routes.forEach(destroyRouteLayer);
+    state.routes = []; state.selectedRouteId = null;
     state.shapes = []; state.selectedIds.clear(); state.walkId = null;
     audioStore.forEach((r) => URL.revokeObjectURL(r.url));
     audioStore.clear(); decoded.clear();
@@ -1767,10 +2365,12 @@
     state.introAudio = null; state.introGain = 1.0;
     state.exitAudio = null; state.exitGain = 1.0;
     state.dialogueColors = { ...DEFAULT_DIALOGUE_COLORS };
+    state.displayStyle = "classic";
 
     updateAlbumArtUI();
     syncDetailsInputs();
     renderSide();
+    renderRoutes();
     resetHistory();          // the blank document becomes the new undo baseline
     toast("Started a new soundwalk.", "ok");
   }
@@ -2084,7 +2684,7 @@
         `${w.creator ? w.creator + " · " : ""}${w.shapeCount || 0} areas · ${w.sizeBytes ? fmtBytes(w.sizeBytes) : ""} · ${(w.updatedAt || "").slice(0, 10)}`;
       const actions = el("div", "actions");
       const dl = el("button", null, "⇩ Download"); dl.onclick = () => downloadWalkZip(w);
-      const load = el("button", null, "✎ Load into editor"); load.onclick = () => loadWalkIntoEditor(w, load);
+      const load = el("button", null, "✎ Load"); load.onclick = () => loadWalkIntoEditor(w, load);
       const del = el("button", "danger", "🗑 Delete"); del.onclick = () => deleteWalkFromServer(w, del);
       actions.append(dl, load, del);
       item.append(info, actions);
@@ -2275,5 +2875,6 @@
 
   setMode("edit");
   renderSide();
+  renderRoutes();
   resetHistory();   // establish the initial (empty) history baseline
 })();

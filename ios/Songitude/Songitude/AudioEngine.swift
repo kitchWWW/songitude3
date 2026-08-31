@@ -18,6 +18,7 @@ final class RenderEngine: ObservableObject {
     @Published private(set) var canEndSession = false
 
     /// Called by the lock-screen / control-center transport. `true` = play, `false` = pause.
+    /// Always invoked on the main thread, via `handleRemoteTransport`.
     var remoteToggle: ((Bool) -> Void)?
 
     private let engine = AVAudioEngine()
@@ -31,10 +32,24 @@ final class RenderEngine: ObservableObject {
     // Audio is decoded off the main thread. loadToken invalidates in-flight decodes when the
     // experience is swapped; lastCoord lets us start loops the moment their clip finishes loading.
     private let loadQueue = DispatchQueue(label: "songitude.audio.load", qos: .userInitiated)
+    // Activating / deactivating the audio session is a synchronous IPC to the media server that can
+    // block for a long time — `setActive(false, .notifyOthersOnDeactivation)` in particular waits on
+    // whatever other app is about to take the route. Serialised here so the order of activate /
+    // deactivate is still exactly the order the transport asked for, but off the main thread when it
+    // is a release: a lock-screen pause must never be able to wedge the UI.
+    private static let sessionQueue = DispatchQueue(label: "songitude.audio.session")
     private var loadToken = 0
     private var lastCoord: CLLocationCoordinate2D?
     private var loadingFiles: Set<String> = []
     private var syncedStarted = false           // synced loops launched (sample-aligned) this session
+    /// Host time the synced loops launched at, and the seconds of skipping applied since. A synced
+    /// voice's position is derived from these rather than from its own playhead, so a skip lands
+    /// every synced clip on the same offset and the sample alignment that defines the mode survives.
+    private var syncedEpochHost: UInt64?
+    private var syncedShift: TimeInterval = 0
+    /// The listener is standing inside at least one soloed area. While that holds, only soloed areas
+    /// are audible — every other area they are inside ducks to silence and comes back on the way out.
+    private var soloActive = false
     private var wasInterrupted = false           // suspended by the system (call/Siri); resume when it ends
     // Residency thresholds (metres from a region's boundary). Hysteresis: decode when within
     // preload, keep until beyond evict — so pacing back and forth over a line doesn't thrash.
@@ -47,11 +62,27 @@ final class RenderEngine: ObservableObject {
         var timer: Timer?
         var isLoop = false
         var target: Float = 0        // volume the current ramp is heading to (drives the map highlight)
+        /// The clip this voice is playing, kept so a skip can reschedule it from a new offset.
+        var buffer: AVAudioPCMBuffer?
+        /// Frame the current schedule started from. A player node's `sampleTime` restarts at 0 every
+        /// time it is stopped and rescheduled, so the offsets have to accumulate here instead.
+        var baseFrame: AVAudioFramePosition = 0
+        /// Bumped on every reschedule. Completion handlers capture it and bail if it moved, so a
+        /// skip can never be mistaken for the clip having played itself out.
+        var epoch = 0
+        /// What to run when a walk-level clip (intro / exit) ends; re-used when a skip reschedules it.
+        var onFinish: (() -> Void)?
     }
-    private struct Runtime { var inside = false; var armed = true }
+    /// `duck` is the solo gain factor last applied to this shape (nil until the first pass), so a
+    /// solo switching on or off can be detected and ramped rather than re-applied every fix.
+    private struct Runtime { var inside = false; var armed = true; var duck: Float? = nil }
 
     private var voices: [String: Voice] = [:]
     private var runtimes: [String: Runtime] = [:]
+    /// Voices that have already left `voices` and are fading out on their own timer. Tracked so a
+    /// teardown can cancel them — a fade that outlives a pause would otherwise detach its node long
+    /// after the graph was torn down (and possibly rebuilt) underneath it.
+    private var fadingVoices: [Voice] = []
 
     // Dialogue queue: one dialogue plays at a time; others wait in entry order and play once each.
     private var dialogueQueue: [String] = []
@@ -76,6 +107,8 @@ final class RenderEngine: ObservableObject {
                        name: AVAudioSession.routeChangeNotification, object: nil)
         nc.addObserver(self, selector: #selector(handleConfigChange(_:)),
                        name: .AVAudioEngineConfigurationChange, object: engine)
+        nc.addObserver(self, selector: #selector(handleForeground),
+                       name: UIApplication.didBecomeActiveNotification, object: nil)
     }
 
     deinit { NotificationCenter.default.removeObserver(self) }
@@ -106,7 +139,7 @@ final class RenderEngine: ObservableObject {
                 } else {
                     // System says stay paused — make isRunning honest instead of lying "playing".
                     self.isRunning = false
-                    try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+                    self.releaseSession()
                     self.updateNowPlayingPlayback(rate: 0)
                 }
             @unknown default: break
@@ -123,7 +156,19 @@ final class RenderEngine: ObservableObject {
               reason == .oldDeviceUnavailable else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self = self, self.isRunning else { return }
-            if let toggle = self.remoteToggle { toggle(false) } else { self.stop() }
+            self.handleRemoteTransport(false)
+        }
+    }
+
+    /// Coming back to the foreground, make the transport honest. If playback was torn down while we
+    /// were away — a lock-screen pause, an interruption the system told us not to resume, or the app
+    /// being suspended with the engine already stopped — settle into a clean paused state so the
+    /// button reads "play" and actually starts again, instead of claiming to be playing over silence.
+    /// A pending auto-resume (a call still in progress) is left alone; that has its own recovery.
+    @objc private func handleForeground() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.isRunning, !self.wasInterrupted, !self.engine.isRunning else { return }
+            self.handleRemoteTransport(false)
         }
     }
 
@@ -137,13 +182,27 @@ final class RenderEngine: ObservableObject {
         }
     }
 
+    /// Claim the session. Runs on `sessionQueue` so it can never overtake a release that was queued
+    /// first — the serial queue is what keeps "pause then immediately play" in the right order — but
+    /// stays synchronous, because the engine must not start before the session is live.
     private func configureSession() {
-        let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.playback, mode: .default, options: [])
-            try session.setActive(true)
-        } catch {
-            print("[RenderEngine] session error: \(error)")
+        Self.sessionQueue.sync {
+            let session = AVAudioSession.sharedInstance()
+            do {
+                try session.setCategory(.playback, mode: .default, options: [])
+                try session.setActive(true)
+            } catch {
+                print("[RenderEngine] session error: \(error)")
+            }
+        }
+    }
+
+    /// Hand the session back. Deliberately fire-and-forget: deactivation can block on the media
+    /// server for a long time, and the caller is usually a pause arriving from the lock screen with
+    /// the app about to be suspended — blocking the main thread there is what left the app frozen.
+    private func releaseSession() {
+        Self.sessionQueue.async {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
     }
 
@@ -209,6 +268,20 @@ final class RenderEngine: ObservableObject {
         return out
     }
 
+    /// A copy of `src` from `frame` to its end. Starting an already-decoded buffer partway through
+    /// needs one: `scheduleSegment` reads from a file, and there is no buffer equivalent. It is
+    /// transient — the player releases it once played, and a loop returns to the full clip after.
+    private static func tailBuffer(_ src: AVAudioPCMBuffer, from frame: AVAudioFramePosition) -> AVAudioPCMBuffer? {
+        let start = Int(max(0, min(frame, AVAudioFramePosition(src.frameLength))))
+        let len = Int(src.frameLength) - start
+        guard len > 0,
+              let out = AVAudioPCMBuffer(pcmFormat: src.format, frameCapacity: AVAudioFrameCount(len)),
+              let sIn = src.floatChannelData, let sOut = out.floatChannelData else { return nil }
+        out.frameLength = AVAudioFrameCount(len)
+        for c in 0..<Int(src.format.channelCount) { sOut[c].update(from: sIn[c] + start, count: len) }
+        return out
+    }
+
     /// The buffer a loop should schedule: the raw clip, or a cached baked crossfade buffer for a
     /// crossfade loop (keyed by shape id since the crossfade time is per shape).
     private func crossfadeBufferFor(_ shape: SoundShape, _ raw: AVAudioPCMBuffer) -> AVAudioPCMBuffer {
@@ -240,7 +313,7 @@ final class RenderEngine: ObservableObject {
         outroActive = false
         teardownAudio()
         isRunning = false
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        releaseSession()
         updateNowPlayingPlayback(rate: 0)
     }
 
@@ -253,7 +326,18 @@ final class RenderEngine: ObservableObject {
         // voice that attaches later doesn't mutate the graph mid-render.
         engine.mainMixerNode.outputVolume = 1.0
         engine.prepare()
-        do { try engine.start() } catch { print("[RenderEngine] start error: \(error)"); return false }
+        do { try engine.start() } catch {
+            // The graph can be left stale by a suspend/resume cycle (typically a lock-screen pause
+            // followed by the app being suspended). Reset it and try once more before giving up,
+            // so hitting play after that doesn't just silently do nothing.
+            print("[RenderEngine] start error: \(error) — resetting and retrying")
+            engine.reset()
+            engine.prepare()
+            do { try engine.start() } catch {
+                print("[RenderEngine] start failed after reset: \(error)")
+                return false
+            }
+        }
         ensureSyncedLoops()          // begin loading + (once ready) launch synced loops in lock-step
         if let c = lastCoord { updateLocation(c) }   // resume region audio without waiting for a fix
         updateNowPlayingPlayback(rate: 1)
@@ -265,9 +349,14 @@ final class RenderEngine: ObservableObject {
     private func teardownAudio() {
         for (id, _) in voices { hardStopVoice(id) }
         voices.removeAll()
+        // Fades already in flight own their nodes, so they have to be cancelled here too — otherwise
+        // their timer fires after the graph is gone and detaches into whatever replaced it.
+        for voice in fadingVoices { detach(voice) }
+        fadingVoices.removeAll()
         if let v = introVoice { detach(v); introVoice = nil }
         if let v = exitVoice { detach(v); exitVoice = nil }
         for id in runtimes.keys { runtimes[id] = Runtime() }
+        soloActive = false
         soundingShapeIDs = []
         engine.stop()
         loadToken &+= 1              // invalidate any in-flight decodes
@@ -275,6 +364,8 @@ final class RenderEngine: ObservableObject {
         crossfadeCache.removeAll()
         loadingFiles.removeAll()
         syncedStarted = false
+        syncedEpochHost = nil
+        syncedShift = 0
         suspendDialogue()
     }
 
@@ -291,24 +382,37 @@ final class RenderEngine: ObservableObject {
         for shape in shapes where GeoUtils.contains(shape, coord: coord, offset: offset) {
             nowInside.insert(shape.id)
         }
+        soloActive = shapes.contains { $0.solo && nowInside.contains($0.id) }
 
         for shape in shapes {
             var rt = runtimes[shape.id] ?? Runtime()
             let isIn = nowInside.contains(shape.id)
             let rising = isIn && !rt.inside
+            // A solo that just came on or went off has to move voices that otherwise set their
+            // volume once (one-shots, dialogue) or hold a constant level (loops with no falloff).
+            // Ducking uses the ducked shape's own fades, so it sounds like leaving and re-entering.
+            let duck = duckFactor(shape)
+            let duckChanged = rt.duck != nil && rt.duck != duck
+            let duckDur: TimeInterval = duck > 0 ? max(0.02, shape.fadeIn) : max(0.02, shape.fadeOut)
+            rt.duck = duck
 
             switch shape.mode {
             case .loop:
                 if isIn {
-                    let target = Float(shape.gain * loopLevel(shape, coord: coord))
+                    let target = Float(shape.gain * loopLevel(shape, coord: coord)) * duck
                     if voices[shape.id] == nil { startLoop(shape, target: target) }
-                    else { setLoopTarget(shape, target: target) }
+                    else if duckChanged, let voice = voices[shape.id] {
+                        ramp(voice, to: target, duration: duckDur)
+                    } else { setLoopTarget(shape, target: target) }
                 } else if voices[shape.id] != nil {
                     stopLoop(shape)
                 }
             case .oneshot:
                 if rising && rt.armed { playOnce(shape); rt.armed = false }
                 if !isIn { rt.armed = true }
+                if duckChanged, let voice = voices[shape.id] {
+                    ramp(voice, to: Float(shape.gain) * duck, duration: duckDur)
+                }
             case .dialogue:
                 // Play once ever; if a dialogue is already sounding, queue and play when it ends.
                 if rising && (dialogueStates[shape.id] ?? .unplayed) == .unplayed {
@@ -316,12 +420,16 @@ final class RenderEngine: ObservableObject {
                     dialogueQueue.append(shape.id)
                     advanceDialogue()
                 }
+                if duckChanged, let voice = voices[shape.id] {
+                    ramp(voice, to: Float(shape.gain) * duck, duration: duckDur)
+                }
             case .syncedLoop:
                 // Never starts/stops here — it's already running in sync; we only gate its volume.
                 if let voice = voices[shape.id] {
-                    let target = isIn ? Float(shape.gain * loopLevel(shape, coord: coord)) : 0
-                    let dur: TimeInterval = rising ? max(0.02, shape.fadeIn)
-                        : (rt.inside && !isIn ? max(0.02, shape.fadeOut) : 0.12)
+                    let target = isIn ? Float(shape.gain * loopLevel(shape, coord: coord)) * duck : 0
+                    let dur: TimeInterval = duckChanged ? duckDur
+                        : (rising ? max(0.02, shape.fadeIn)
+                           : (rt.inside && !isIn ? max(0.02, shape.fadeOut) : 0.12))
                     ramp(voice, to: target, duration: dur)
                 }
             }
@@ -394,12 +502,15 @@ final class RenderEngine: ObservableObject {
         for shape in shapes where shape.mode == .syncedLoop {
             guard let file = shape.audioFile, let buf = bufferCache[file], voices[shape.id] == nil else { continue }
             let voice = Voice(); voice.isLoop = true
+            voice.buffer = buf
             attach(voice, format: buf.format)
             voice.player.scheduleBuffer(buf, at: nil, options: [.loops], completionHandler: nil)
             voice.player.volume = 0                    // silent but running until the listener enters
             voices[shape.id] = voice
             voice.player.play(at: start)
         }
+        syncedEpochHost = start.hostTime
+        syncedShift = 0
         syncedStarted = true
         refreshSounding()
     }
@@ -437,6 +548,14 @@ final class RenderEngine: ObservableObject {
 
     // MARK: - Voice control
 
+    /// Solo multiplier: 0 while a solo elsewhere is ducking this shape, 1 otherwise. A duck is a
+    /// gain change, never a stop — the ducked voice keeps running underneath so it returns exactly
+    /// where it would have been. Deliberately uniform across every mode, dialogue included: a
+    /// ducked dialogue keeps advancing silently rather than being cut or replayed.
+    private func duckFactor(_ shape: SoundShape) -> Float {
+        (soloActive && !shape.solo) ? 0 : 1
+    }
+
     /// Proximity multiplier (0..1) for a circle loop with a falloff profile; 1 otherwise.
     private func loopLevel(_ shape: SoundShape, coord: CLLocationCoordinate2D) -> Double {
         guard shape.type == .circle, shape.falloff != .none,
@@ -450,6 +569,7 @@ final class RenderEngine: ObservableObject {
         // Crossfade loops schedule a baked seamless buffer; simple loops schedule the raw clip.
         let buf = shape.isCrossfadeLoop ? crossfadeBufferFor(shape, raw) : raw
         let voice = Voice(); voice.isLoop = true
+        voice.buffer = buf
         attach(voice, format: buf.format)
         voice.player.scheduleBuffer(buf, at: nil, options: [.loops], completionHandler: nil)
         voice.player.volume = 0
@@ -467,29 +587,167 @@ final class RenderEngine: ObservableObject {
     private func stopLoop(_ shape: SoundShape) {
         guard let voice = voices[shape.id] else { return }
         voices.removeValue(forKey: shape.id)
-        ramp(voice, to: 0, duration: max(0.02, shape.fadeOut)) { [weak self] in
-            self?.detach(voice)
+        fadeOutAndDetach(voice, duration: max(0.02, shape.fadeOut))
+    }
+
+    /// Fade a voice that has already left `voices` down to silence and detach it. Registered in
+    /// `fadingVoices` for the duration so a teardown mid-fade can cancel it.
+    private func fadeOutAndDetach(_ voice: Voice, duration: TimeInterval) {
+        fadingVoices.append(voice)
+        ramp(voice, to: 0, duration: duration) { [weak self] in
+            guard let self = self else { return }
+            self.fadingVoices.removeAll { $0 === voice }
+            self.detach(voice)
         }
     }
 
     private func playOnce(_ shape: SoundShape) {
         guard let file = shape.audioFile, let buf = bufferCache[file] else { return }
         let voice = Voice(); voice.isLoop = false
+        voice.buffer = buf
         attach(voice, format: buf.format)
-        voice.player.volume = Float(shape.gain)
-        voice.target = Float(shape.gain)
-        voice.player.scheduleBuffer(buf, at: nil, options: []) { [weak self] in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                if self.voices[shape.id] === voice {
-                    self.voices.removeValue(forKey: shape.id)
-                    self.detach(voice)
-                    self.refreshSounding()
-                }
+        let level = Float(shape.gain) * duckFactor(shape)
+        voice.player.volume = level
+        voice.target = level
+        voices[shape.id] = voice
+        scheduleOnce(voice, buf: buf, from: 0, shape: shape)
+        voice.player.play()
+    }
+
+    // MARK: - Skip (the ±15 s buttons)
+
+    /// How far one press of a skip button moves every voice.
+    static let skipInterval: TimeInterval = 15
+
+    /// Move every sounding clip `delta` seconds through its own playback — forward on a positive
+    /// delta, back on a negative one.
+    ///
+    /// This is only ever a playhead move. It does not rewind the listener's position, revisit areas
+    /// they have walked out of, or start anything that isn't already sounding: what you hear is
+    /// exactly what was playing a moment ago, further along or further back.
+    ///
+    /// The modes differ only in what the ends of a clip mean. A loop wraps in both directions. A
+    /// one-shot or a dialogue can't wrap — it is meant to be heard once through — so rewinding past
+    /// its start restarts it from the top, and skipping past its end counts as having heard it out.
+    func skip(by delta: TimeInterval) {
+        // The outro is a timed sequence (fade → clip → fade → stop); moving its audio underneath
+        // those timers would only desynchronise them from what is actually playing.
+        guard isRunning, !outroActive, delta != 0 else { return }
+
+        // Every synced loop is rescheduled against one common host time a beat in the future, so
+        // they resume in lock-step instead of drifting apart by however long this loop takes.
+        let syncedStart = AVAudioTime(hostTime: mach_absolute_time() + AVAudioTime.hostTime(forSeconds: 0.15))
+        syncedShift += delta
+
+        for (id, voice) in voices {
+            guard let shape = shapes.first(where: { $0.id == id }) else { continue }
+            switch shape.mode {
+            case .syncedLoop:          skipSynced(voice, to: syncedStart)
+            case .loop:                skipLoop(voice, by: delta)
+            case .oneshot, .dialogue:  skipOnce(voice, shape: shape, by: delta)
             }
         }
+        // The walk's intro is a clip like any other, so it moves with everything else.
+        if let voice = introVoice { skipClip(voice, by: delta) }
+        refreshSounding()
+    }
+
+    /// Frames of its clip this voice has played, across every reschedule.
+    private func playhead(_ voice: Voice) -> AVAudioFramePosition {
+        guard let nodeTime = voice.player.lastRenderTime,
+              let played = voice.player.playerTime(forNodeTime: nodeTime) else { return voice.baseFrame }
+        return voice.baseFrame + max(0, played.sampleTime)
+    }
+
+    /// The frame `delta` seconds from where `voice` is now. `wrap` folds it back into the clip, for
+    /// the modes that loop; without it the frame can land outside the clip and the caller decides
+    /// what that means.
+    private func skipTarget(_ voice: Voice, by delta: TimeInterval,
+                            wrap: Bool) -> (frame: AVAudioFramePosition, buffer: AVAudioPCMBuffer)? {
+        guard let buf = voice.buffer else { return nil }
+        let length = AVAudioFramePosition(buf.frameLength)
+        guard length > 0 else { return nil }
+        var frame = playhead(voice) + AVAudioFramePosition(delta * buf.format.sampleRate)
+        if wrap {
+            frame %= length
+            if frame < 0 { frame += length }        // a rewind past the top comes round to the tail
+        }
+        return (frame, buf)
+    }
+
+    /// Reschedule a looping voice from `frame`: the rest of the clip once, then the whole clip on
+    /// repeat — which is the shape the original schedule had. Volume, and any ramp in flight, are
+    /// untouched: only the playhead moves.
+    private func rescheduleLoop(_ voice: Voice, buf: AVAudioPCMBuffer, from frame: AVAudioFramePosition) {
+        voice.epoch &+= 1
+        voice.player.stop()          // resets the node's sampleTime, which is why baseFrame exists
+        voice.baseFrame = frame
+        // The rest of this pass through the clip, then the whole clip on repeat from there on.
+        if frame > 0, let tail = Self.tailBuffer(buf, from: frame) {
+            voice.player.scheduleBuffer(tail, at: nil, options: [], completionHandler: nil)
+        }
+        voice.player.scheduleBuffer(buf, at: nil, options: [.loops], completionHandler: nil)
+    }
+
+    private func skipLoop(_ voice: Voice, by delta: TimeInterval) {
+        guard let t = skipTarget(voice, by: delta, wrap: true) else { return }
+        rescheduleLoop(voice, buf: t.buffer, from: t.frame)
         voice.player.play()
-        voices[shape.id] = voice
+    }
+
+    /// A synced loop takes its new position from the shared launch instant rather than its own
+    /// playhead, so every synced clip lands on the same offset and they stay aligned with each other.
+    private func skipSynced(_ voice: Voice, to when: AVAudioTime) {
+        guard let buf = voice.buffer, let launched = syncedEpochHost, when.hostTime > launched else { return }
+        let rate = buf.format.sampleRate
+        let duration = Double(buf.frameLength) / rate
+        guard duration > 0 else { return }
+        let elapsed = AVAudioTime.seconds(forHostTime: when.hostTime - launched) + syncedShift
+        var position = elapsed.truncatingRemainder(dividingBy: duration)
+        if position < 0 { position += duration }
+        rescheduleLoop(voice, buf: buf, from: AVAudioFramePosition(position * rate))
+        voice.player.play(at: when)
+    }
+
+    private func skipOnce(_ voice: Voice, shape: SoundShape, by delta: TimeInterval) {
+        guard let t = skipTarget(voice, by: delta, wrap: false) else { return }
+        voice.epoch &+= 1
+        voice.player.stop()
+        // Past the end of a play-once clip is the same as having heard it through.
+        guard t.frame < AVAudioFramePosition(t.buffer.frameLength) else { finishOnce(shape, voice); return }
+        scheduleOnce(voice, buf: t.buffer, from: max(0, t.frame), shape: shape)   // before the top ⇒ from the top
+        voice.player.play()
+    }
+
+    private func skipClip(_ voice: Voice, by delta: TimeInterval) {
+        guard let t = skipTarget(voice, by: delta, wrap: false) else { return }
+        voice.epoch &+= 1
+        voice.player.stop()
+        guard t.frame < AVAudioFramePosition(t.buffer.frameLength) else { voice.onFinish?(); return }
+        scheduleClip(voice, from: max(0, t.frame))
+        voice.player.play()
+    }
+
+    /// Schedule a play-once clip (one-shot or dialogue) from `from`. The completion handler is
+    /// guarded on the voice's epoch so a skip that reschedules it doesn't read as the clip ending.
+    private func scheduleOnce(_ voice: Voice, buf: AVAudioPCMBuffer,
+                              from: AVAudioFramePosition, shape: SoundShape) {
+        let epoch = voice.epoch
+        voice.baseFrame = from
+        guard let part = (from == 0 ? buf : Self.tailBuffer(buf, from: from)) else { finishOnce(shape, voice); return }
+        voice.player.scheduleBuffer(part, at: nil, options: []) { [weak self] in
+            DispatchQueue.main.async {
+                guard let self = self, voice.epoch == epoch, self.voices[shape.id] === voice else { return }
+                self.finishOnce(shape, voice)
+            }
+        }
+    }
+
+    /// A play-once clip is over — by playing out, or by being skipped past its end.
+    private func finishOnce(_ shape: SoundShape, _ voice: Voice) {
+        if voices[shape.id] === voice { voices.removeValue(forKey: shape.id) }
+        detach(voice)
+        if shape.mode == .dialogue { finishDialogue(shape.id) } else { refreshSounding() }
     }
 
     // MARK: - Dialogue queue (one at a time, play once, FIFO)
@@ -516,21 +774,14 @@ final class RenderEngine: ObservableObject {
             return
         }
         let voice = Voice(); voice.isLoop = false
+        voice.buffer = buf
         attach(voice, format: buf.format)
-        voice.player.volume = Float(shape.gain)
-        voice.target = Float(shape.gain)
-        voice.player.scheduleBuffer(buf, at: nil, options: []) { [weak self] in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                if self.voices[shape.id] === voice {
-                    self.voices.removeValue(forKey: shape.id)
-                    self.detach(voice)
-                    self.finishDialogue(shape.id)
-                }
-            }
-        }
-        voice.player.play()
+        let level = Float(shape.gain) * duckFactor(shape)
+        voice.player.volume = level
+        voice.target = level
         voices[shape.id] = voice
+        scheduleOnce(voice, buf: buf, from: 0, shape: shape)
+        voice.player.play()
         refreshSounding()
     }
 
@@ -577,11 +828,25 @@ final class RenderEngine: ObservableObject {
 
     private func startClip(_ buf: AVAudioPCMBuffer, gain: Float, onFinish: @escaping () -> Void) -> Voice {
         let voice = Voice()
+        voice.buffer = buf
+        voice.onFinish = onFinish
         attach(voice, format: buf.format)
         voice.player.volume = gain
-        voice.player.scheduleBuffer(buf, at: nil, options: []) { DispatchQueue.main.async { onFinish() } }
+        scheduleClip(voice, from: 0)
         voice.player.play()
         return voice
+    }
+
+    /// Schedule a walk-level clip from `from`, guarded on the voice's epoch so a skip that
+    /// reschedules it doesn't fire the finish handler belonging to the schedule it replaced.
+    private func scheduleClip(_ voice: Voice, from: AVAudioFramePosition) {
+        guard let buf = voice.buffer else { return }
+        let epoch = voice.epoch
+        voice.baseFrame = from
+        guard let part = (from == 0 ? buf : Self.tailBuffer(buf, from: from)) else { voice.onFinish?(); return }
+        voice.player.scheduleBuffer(part, at: nil, options: []) {
+            DispatchQueue.main.async { if voice.epoch == epoch { voice.onFinish?() } }
+        }
     }
 
     /// Play the intro clip once, gated so it doesn't replay when resuming the same walk within an hour.
@@ -647,14 +912,14 @@ final class RenderEngine: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
             guard let self = self, self.outroActive else { return }
             self.outroActive = false
-            if let toggle = self.remoteToggle { toggle(false) } else { self.stop() }   // end the whole session
+            self.handleRemoteTransport(false)     // end the whole session
         }
     }
 
     private func fadeDialogueVoices(duration: TimeInterval) {
         for id in Array(voices.keys) where shapes.first(where: { $0.id == id })?.mode == .dialogue {
             if let voice = voices.removeValue(forKey: id) {
-                ramp(voice, to: 0, duration: duration) { [weak self] in self?.detach(voice) }
+                fadeOutAndDetach(voice, duration: duration)
             }
         }
         refreshSounding()
@@ -663,7 +928,7 @@ final class RenderEngine: ObservableObject {
     private func fadeAllVoices(duration: TimeInterval) {
         let entries = voices; voices.removeAll()
         for (_, voice) in entries {
-            ramp(voice, to: 0, duration: duration) { [weak self] in self?.detach(voice) }
+            fadeOutAndDetach(voice, duration: duration)
         }
         soundingShapeIDs = []
     }
@@ -731,13 +996,47 @@ final class RenderEngine: ObservableObject {
         MPNowPlayingInfoCenter.default().playbackState = rate > 0 ? .playing : .paused
     }
 
+    /// Apply a transport change that came from outside the app — the lock screen, Control Centre, a
+    /// headphone button, an unplugged route. `play == nil` means "toggle", resolved on the main
+    /// thread so it reads the state that is actually current rather than whatever the command thread
+    /// happened to see.
+    ///
+    /// The background task assertion is the important part. Pausing stops the engine and drops the
+    /// location updates, which removes both of the reasons iOS was keeping the app alive — so the
+    /// system is free to suspend it *during* the teardown that pause kicked off. Being suspended
+    /// part-way through tearing down the graph and handing back the audio session is what left the
+    /// app wedged and ignoring touches the next time it came forward. Holding the assertion until
+    /// the teardown has drained lets it finish first, and the app then suspends cleanly paused.
+    private func handleRemoteTransport(_ play: Bool?) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            let wantsPlay = play ?? !self.isRunning
+
+            var task: UIBackgroundTaskIdentifier = .invalid
+            let finish = {
+                guard task != .invalid else { return }
+                UIApplication.shared.endBackgroundTask(task)
+                task = .invalid
+            }
+            if UIApplication.shared.applicationState != .active {
+                task = UIApplication.shared.beginBackgroundTask(withName: "songitude.transport") { finish() }
+            }
+
+            if let toggle = self.remoteToggle { toggle(wantsPlay) }
+            else if wantsPlay { self.start() } else { self.stop() }
+
+            // Fades, detaches and the session release are all queued work; give them room to land
+            // before handing the time back.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { finish() }
+        }
+    }
+
     private func configureRemoteCommands() {
         let c = MPRemoteCommandCenter.shared()
-        c.playCommand.addTarget { [weak self] _ in self?.remoteToggle?(true); return .success }
-        c.pauseCommand.addTarget { [weak self] _ in self?.remoteToggle?(false); return .success }
+        c.playCommand.addTarget { [weak self] _ in self?.handleRemoteTransport(true); return .success }
+        c.pauseCommand.addTarget { [weak self] _ in self?.handleRemoteTransport(false); return .success }
         c.togglePlayPauseCommand.addTarget { [weak self] _ in
-            guard let self = self else { return .commandFailed }
-            self.remoteToggle?(!self.isRunning); return .success
+            self?.handleRemoteTransport(nil); return .success
         }
         // Not a seekable medium — disable scrubbing transport.
         c.changePlaybackPositionCommand.isEnabled = false

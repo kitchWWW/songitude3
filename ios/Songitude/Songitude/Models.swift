@@ -98,9 +98,15 @@ struct SoundShape: Codable, Identifiable {
     let loopMode: String        // loop mode only: "simple" | "crossfade" (absent ⇒ "simple")
     let crossfade: Double       // seconds; overlap for crossfade loops
     let falloff: Falloff        // circle loops: proximity gain toward the center
+    /// Standing inside a soloed area ducks every non-soloed area the listener is also inside.
+    /// Absent in older bundles ⇒ false ⇒ areas simply layer, as they always did.
+    let solo: Bool
+    /// Sounds normally but is never drawn on the map for a listener. Absent ⇒ false ⇒ drawn.
+    let hidden: Bool
 
     enum CodingKeys: String, CodingKey {
-        case id, name, type, color, center, radius, points, audioFile, mode, gain, fadeIn, fadeOut, loopMode, crossfade, falloff
+        case id, name, type, color, center, radius, points, audioFile, mode, gain, fadeIn, fadeOut,
+             loopMode, crossfade, falloff, solo, hidden
     }
 
     init(from decoder: Decoder) throws {
@@ -120,6 +126,8 @@ struct SoundShape: Codable, Identifiable {
         loopMode = (try? c.decode(String.self, forKey: .loopMode)) ?? "simple"
         crossfade = (try? c.decode(Double.self, forKey: .crossfade)) ?? 1.0
         falloff = (try? c.decode(Falloff.self, forKey: .falloff)) ?? .none
+        solo = (try? c.decode(Bool.self, forKey: .solo)) ?? false
+        hidden = (try? c.decode(Bool.self, forKey: .hidden)) ?? false
     }
 }
 
@@ -155,6 +163,38 @@ extension SoundShape {
     var isCrossfadeLoop: Bool { mode == .loop && loopMode == "crossfade" }
 }
 
+/// A drawn suggestion of where to walk: an open path with a marker at each end, optionally
+/// labelled. Purely visual — a route carries no audio, has no containment test, and has no bearing
+/// on playback of any kind. Absent in older bundles ⇒ nothing is drawn, which is exactly right.
+struct SuggestedRoute: Codable, Identifiable {
+    let id: String
+    let name: String
+    var points: [[Double]]      // [[lat, lng], ...] in walking order
+    let color: String           // "#rrggbb"
+    let width: Double           // stroke width in points
+    let startLabel: String      // "" ⇒ a plain marker with no text
+    let endLabel: String
+
+    enum CodingKeys: String, CodingKey { case id, name, points, color, width, startLabel, endLabel }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        points = (try? c.decode([[Double]].self, forKey: .points)) ?? []
+        id = (try? c.decode(String.self, forKey: .id)) ?? UUID().uuidString
+        name = (try? c.decode(String.self, forKey: .name)) ?? "Route"
+        color = (try? c.decode(String.self, forKey: .color)) ?? "#111111"
+        width = (try? c.decode(Double.self, forKey: .width)) ?? 6
+        startLabel = (try? c.decode(String.self, forKey: .startLabel)) ?? ""
+        endLabel = (try? c.decode(String.self, forKey: .endLabel)) ?? ""
+    }
+
+    /// A route needs two points to be a line; anything less simply isn't drawn.
+    var isDrawable: Bool { points.count >= 2 }
+    var coords: [CLLocationCoordinate2D] {
+        points.compactMap { $0.count == 2 ? CLLocationCoordinate2D(latitude: $0[0], longitude: $0[1]) : nil }
+    }
+}
+
 /// The full map definition (`map.json`).
 struct SoundMap: Codable {
     let version: Int
@@ -171,13 +211,21 @@ struct SoundMap: Codable {
     let zoom: Double?
     let dialogueColors: DialogueColors?
     let startAnchor: WalkAnchor?    // present ⇒ the walk is transportable; absent ⇒ fixed in space
+    /// How areas are drawn for listeners: "classic" or "fuzzy". Absent ⇒ "classic", the outlined
+    /// look every bundle published before this field had.
+    let displayStyle: String?
     var shapes: [SoundShape]
+    /// Suggested routes drawn over the map. Optional — older bundles have none.
+    var routes: [SuggestedRoute]?
+
+    var drawableRoutes: [SuggestedRoute] { (routes ?? []).filter { $0.isDrawable } }
 
     var centerCoord: CLLocationCoordinate2D {
         if let c = center, c.count == 2 { return CLLocationCoordinate2D(latitude: c[0], longitude: c[1]) }
         return CLLocationCoordinate2D(latitude: 40.7128, longitude: -74.006)
     }
     var dialoguePalette: DialogueColors { dialogueColors ?? DialogueColors() }
+    var isFuzzy: Bool { displayStyle == "fuzzy" }
 }
 
 /// A loadable bundle on disk: a folder containing `map.json`, `audio/`, and optional album art.

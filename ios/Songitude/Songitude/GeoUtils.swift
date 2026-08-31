@@ -91,6 +91,13 @@ extension SoundMap {
             if let pts = s.points { s.points = pts.map(t.apply) }
             return s
         }
+        // Routes travel with the walk too — a suggested path left behind where the walk was
+        // authored would point the listener at nothing.
+        copy.routes = routes?.map { route in
+            var r = route
+            r.points = r.points.map(t.apply)
+            return r
+        }
         return copy
     }
 }

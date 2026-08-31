@@ -12,6 +12,8 @@ REGION="${REGION:-us-east-1}"
 BUCKET="${BUCKET:-songitude-walks}"
 ROLE="${ROLE:-songitude-walks-lambda}"
 PRESIGN_FN="${PRESIGN_FN:-songitude-presign}"
+REPORT_FN="${REPORT_FN:-songitude-report}"
+REPORT_TO="${REPORT_TO:-brian.e2014@gmail.com}"
 MANIFEST_FN="${MANIFEST_FN:-songitude-manifest}"
 ALLOW_ORIGIN="${ALLOW_ORIGIN:-https://songitude.com}"
 PUBLIC_BASE="${PUBLIC_BASE:-https://${BUCKET}.s3.amazonaws.com}"
@@ -54,6 +56,7 @@ aws iam put-role-policy --role-name "$ROLE" --policy-name inline --policy-docume
   \"Version\":\"2012-10-17\",\"Statement\":[
     {\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\",\"s3:PutObject\",\"s3:ListBucket\"],
      \"Resource\":[\"arn:aws:s3:::$BUCKET\",\"arn:aws:s3:::$BUCKET/*\"]},
+    {\"Effect\":\"Allow\",\"Action\":[\"ses:SendEmail\"],\"Resource\":\"*\"},
     {\"Effect\":\"Allow\",\"Action\":[\"logs:CreateLogGroup\",\"logs:CreateLogStream\",\"logs:PutLogEvents\"],
      \"Resource\":\"arn:aws:logs:*:*:*\"}]}"
 ROLE_ARN="arn:aws:iam::${ACCT}:role/${ROLE}"
@@ -96,6 +99,18 @@ aws lambda add-permission --function-name "$PRESIGN_FN" --statement-id fnurl \
   --action lambda:InvokeFunctionUrl --principal "*" --function-url-auth-type NONE >/dev/null 2>&1 || true
 FN_URL="$(aws lambda get-function-url-config --function-name "$PRESIGN_FN" --query FunctionUrl --output text)"
 
+echo "==> Report Lambda (Settings -> Report -> emails $REPORT_TO)"
+deploy_fn "$REPORT_FN" report \
+  "{\"REPORT_TO\":\"$REPORT_TO\",\"REPORT_FROM\":\"$REPORT_TO\"}" 15
+REPORT_CORS="{\"AllowOrigins\":[\"*\"],\"AllowMethods\":[\"POST\"],\"AllowHeaders\":[\"content-type\"],\"MaxAge\":3000}"
+aws lambda create-function-url-config --function-name "$REPORT_FN" --auth-type NONE --cors "$REPORT_CORS" >/dev/null 2>&1 \
+  || aws lambda update-function-url-config --function-name "$REPORT_FN" --auth-type NONE --cors "$REPORT_CORS" >/dev/null 2>&1 || true
+aws lambda add-permission --function-name "$REPORT_FN" --statement-id fnurl \
+  --action lambda:InvokeFunctionUrl --principal "*" --function-url-auth-type NONE >/dev/null 2>&1 || true
+# NOTE: public Lambda Function URLs are blocked in this account (they 403 regardless of the
+# invoke permission), so the app calls the report Lambda through API Gateway, as publishing does.
+REPORT_URL="https://omzhe5l8f5.execute-api.us-east-1.amazonaws.com"
+
 echo "==> Manifest Lambda"
 deploy_fn "$MANIFEST_FN" manifest "{\"WALKS_BUCKET\":\"$BUCKET\",\"PUBLIC_BASE\":\"$PUBLIC_BASE\"}" 60
 aws lambda add-permission --function-name "$MANIFEST_FN" --statement-id s3invoke \
@@ -113,3 +128,4 @@ echo
 echo "DONE."
 echo "  Publish API (put in editor/config.js publishApiUrl): $FN_URL"
 echo "  Manifest URL (put in the iOS app):                  $PUBLIC_BASE/walks/manifest.json"
+echo "  Report API  (put in the iOS app ReportService):      $REPORT_URL"

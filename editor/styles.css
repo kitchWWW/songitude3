@@ -50,7 +50,7 @@ button.btn-busy {
 }
 
 /* Track is a neutral gray so it reads on both light and colored buttons; the moving arc takes the
-   button's own text color, which is why it stays visible on "Load into editor" and on Publish. */
+   button's own text color, which is why it stays visible on "Load" and on Publish. */
 .spinner {
   display: inline-block; width: 12px; height: 12px; vertical-align: -1px; margin-right: 5px;
   border: 2px solid rgba(120,130,150,.35); border-top-color: currentColor; border-radius: 50%;
@@ -135,7 +135,14 @@ main { flex: 1; display: flex; min-height: 0; }
   padding: 8px 12px; background: var(--panel);
   border-bottom: 1px solid var(--line);
 }
-.toolbar .hint { color: var(--muted); font-size: 12px; }
+/* The hint shares its row with the tool buttons. It is the only thing allowed to shrink, and it
+   truncates rather than wrapping — so however long the text gets, the buttons keep their size. */
+.toolbar > button { flex: 0 0 auto; }
+.toolbar .hint {
+  color: var(--muted); font-size: 12px;
+  flex: 0 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .listener-readout { color: var(--accent); font-size: 12px; font-variant-numeric: tabular-nums; }
 #stopListen { margin-left: auto; }
 
@@ -240,6 +247,8 @@ main { flex: 1; display: flex; min-height: 0; }
 .params label { display: flex; align-items: center; gap: 6px; }
 .params input[type="number"] { width: 58px; }
 .params input[type="range"] { width: 90px; }
+.check-inline { cursor: pointer; user-select: none; }
+.check-inline input { margin: 0; }
 
 /* ---------- Color picker popover ---------- */
 .color-popover {
@@ -349,7 +358,10 @@ button.publish:hover { background: #5c3fe0; }
 #toast.ok { border-color: var(--ok); }
 
 /* Leaflet light tweaks */
-.leaflet-container { background: #dfe6ef; }
+.leaflet-container { background: #e6e6e6; }   /* grey twin of the old #dfe6ef, shown while tiles load */
+/* Tiles live in their own Leaflet pane, so this greys the basemap and nothing else: the shapes,
+   routes and drag handles sit in the overlay/marker panes and keep their colour. */
+.leaflet-tile-pane { filter: grayscale(1); }
 .leaflet-tooltip.shape-tip { background: #fff; border: 1px solid var(--line); color: var(--text); }
 .listener-marker {
   width: 18px; height: 18px; border-radius: 50%;
@@ -411,3 +423,19 @@ input[type="color"]:disabled { opacity: .4; cursor: default; }
 .anchor-arrow { width: 30px; height: 30px; display: grid; place-items: center;
   filter: drop-shadow(0 1px 3px rgba(20,30,55,.45)); transform-origin: 50% 50%; }
 #anchorHeadingRow input[type="range"] { flex: 1; }
+
+/* ---- suggested routes ------------------------------------------------- */
+/* Endpoint markers. iconSize is null so the div sizes itself around the label;
+   iconAnchor centres the dot, and the label flows to its right without moving it. */
+.route-end { display: flex; align-items: center; gap: 6px; height: 20px; white-space: nowrap; pointer-events: none; }
+.route-end i { display: block; border-radius: 50%; flex: 0 0 auto; }
+.route-end b {
+  font-size: 12px; font-weight: 700; line-height: 1;
+  padding: 3px 7px; border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+.route-label-input { width: 108px; }
+
+/* Pan tool: the map is the only thing you can grab, so show the hand closing on drag. */
+#map.pan-mode:active { cursor: grabbing; }

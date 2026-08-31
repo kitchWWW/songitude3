@@ -1,8 +1,13 @@
 import SwiftUI
 import CoreLocation
 
-/// First-run welcome. A single big button fires the iOS location request; the outcome routes
-/// the user into the experience or explains how to enable location later.
+/// First-run welcome, and the only place we ask for location up front.
+///
+/// App Review 5.1.1(iv) governs this screen: a pre-permission screen may explain what *this app*
+/// does with location, but must never name the system dialog's options, steer which one to pick,
+/// or dress the advance button up as consent ("Enable", "Allow"). The button stays neutral, there
+/// is always a way past without granting, and a refusal is met with silence here — the walk asks
+/// again at the one moment it actually needs location.
 struct OnboardingView: View {
     @EnvironmentObject var app: AppState
     /// True while the splash still owns the logo; this view reserves the space but draws nothing,
@@ -42,13 +47,16 @@ struct OnboardingView: View {
 
                 Spacer()
 
-                Label("Tap “Allow While Using App”", systemImage: "location.fill")
+                // Why we are about to ask. Describes the app's own behaviour and nothing about the
+                // dialog that follows or how to answer it.
+                Text("Songitude needs your location to play the sounds placed around you and follow you as you walk.")
                     .font(.subheadline.weight(.semibold))
+                    .multilineTextAlignment(.center)
                     .padding(.horizontal, 28)
                     .padding(.bottom, 4)
 
-                Button(action: enable) {
-                    Text("Enable location permissions")
+                Button(action: advance) {
+                    Text("Continue")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 16)
@@ -56,6 +64,13 @@ struct OnboardingView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .padding(.horizontal, 24)
+
+                // The way in without granting anything. It also means this screen can never strand
+                // anyone: if iOS declines to present the dialog at all (a restricted device), the
+                // primary button appears to do nothing and this is still a way forward.
+                Button("Not now") { app.completeOnboarding() }
+                    .font(.subheadline)
+                    .padding(.top, 2)
 
                 Text("We only use your location to play the right sounds around you, never to track or share where you are.")
                     .font(.caption2)
@@ -66,36 +81,21 @@ struct OnboardingView: View {
             }
         }
         .onChange(of: app.location.authorization) { status in
-            guard requested else { return }
-            switch status {
-            case .authorizedWhenInUse, .authorizedAlways:
-                app.completeOnboarding()   // location starts later, when they hit play
-            case .denied, .restricted:
-                app.showPermissionDeniedAlert = true
-                app.completeOnboarding()   // let them in; they can enable later in Settings
-            default:
-                break
-            }
-        }
-        .alert("Location is off", isPresented: $app.showPermissionDeniedAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("You won't be able to listen to the experience until you enable location. You can turn it on any time from the Settings menu (gear icon).")
+            // Whatever they chose, the answer is in, so go in. A refusal is deliberately met with
+            // nothing here: ContentView owns the single "Location is off" alert, and it fires from
+            // togglePlayback — at the moment the listener asks for the thing that needs location.
+            guard requested, status != .notDetermined else { return }
+            app.completeOnboarding()
         }
     }
 
-    private func enable() {
+    /// The neutral advance button: ask iOS once if we have never asked, otherwise just go in.
+    private func advance() {
         requested = true
-        switch app.location.authorization {
-        case .notDetermined:
-            app.enableLocation()          // system dialog → .onChange handles the outcome
-        case .authorizedWhenInUse, .authorizedAlways:
-            app.completeOnboarding()      // already authorized; location starts when they hit play
-        case .denied, .restricted:
-            app.showPermissionDeniedAlert = true
-            app.completeOnboarding()      // let them in; they can enable later in Settings
-        @unknown default:
-            app.enableLocation()
+        if app.location.authorization == .notDetermined {
+            app.enableLocation()          // system dialog → .onChange carries the outcome
+        } else {
+            app.completeOnboarding()      // already decided, one way or the other — nothing to ask
         }
     }
 }

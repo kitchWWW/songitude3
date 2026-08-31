@@ -41,9 +41,11 @@
   <main>
     <section id="mapPane">
       <div id="editToolbar" class="toolbar">
-        <button id="toolPolygon">▰ Draw polygon</button>
-        <button id="toolCircle">◯ Draw circle</button>
+        <button id="toolPolygon">▰ Polygon</button>
+        <button id="toolCircle">◯ Circle</button>
+        <button id="toolRoute">⤳ Route</button>
         <button id="toolSelect" class="active">➤ Select</button>
+        <button id="toolPan">✜ Pan</button>
         <span class="hint" id="toolHint">Select a tool to start drawing.</span>
       </div>
       <div id="listenToolbar" class="toolbar" hidden>
@@ -65,6 +67,7 @@
     <aside id="sidePane">
       <div class="side-tabs">
         <button id="tabBtnAreas" class="side-tab active">Sound areas <span id="shapeCount" class="count">0</span></button>
+        <button id="tabBtnRoutes" class="side-tab">Routes <span id="routeCount" class="count">0</span></button>
         <button id="tabBtnDetails" class="side-tab">Details</button>
       </div>
 
@@ -76,8 +79,16 @@
         </div>
         <div id="shapeList"></div>
         <p id="emptyState" class="empty">
-          No sound areas yet.<br />Use <b>Draw polygon</b> or <b>Draw circle</b> on the map,
+          No sound areas yet.<br />Use <b>Polygon</b> or <b>Circle</b> on the map,
           then drop an audio file onto a card.
+        </p>
+      </div>
+
+      <div id="tabRoutes" class="tab-panel" hidden>
+        <div id="routeList"></div>
+        <p id="routeEmpty" class="empty">
+          No routes yet.<br />Use <b>Route</b> on the map to suggest a path through the walk.
+          Routes are drawn for listeners but make no sound and touch nothing else.
         </p>
       </div>
 
@@ -159,7 +170,7 @@
           <div class="field">
             <label class="check-row">
               <input type="checkbox" id="mapAnchorOn" />
-              <span>Start listener at a specific location</span>
+              <span>Listen from anywhere</span>
             </label>
             <span class="field-hint">Drag the pin on the map to set where the walk begins. When a
               listener opens it, the whole walk moves and turns so the pin lands on them, facing the
@@ -169,6 +180,15 @@
               <input id="mapAnchorHeading" type="range" min="0" max="359" step="1" />
               <span id="anchorHeadingVal" class="field-count"></span>
             </span>
+          </div>
+          <div class="field">
+            <span class="field-label">Shape outline style
+              <span class="field-hint">— how sound areas are drawn for listeners</span></span>
+            <select id="mapDisplayStyle">
+              <option value="classic">Classic — outlined areas</option>
+              <option value="fuzzy">Fuzzy — no outline, soft blurred edges</option>
+            </select>
+            <span class="field-hint">View changes in the Listen tab.</span>
           </div>
         </div>
       </div>
