@@ -28,9 +28,11 @@
   const BASEMAP_URL =
     "https://basemaps.cartocdn.com/rastertiles/light_all/{z}/{x}/{y}{r}.png?key=" + CARTO_KEY;
 
-  const lmap = L.map("map", { zoomControl: false }).setView([40.7128, -74.006], 15);
-  L.tileLayer(BASEMAP_URL,
-    { attribution: "&copy; OpenStreetMap &copy; CARTO", maxZoom: 20 }).addTo(lmap);
+  const lmap = L.map("map", { zoomControl: false, attributionControl: false })
+    .setView([40.7128, -74.006], 15);
+  // Credit is rendered in #footerBar instead — Leaflet's control sits over the map bottom-right and
+  // collides with the footer on narrow screens.
+  L.tileLayer(BASEMAP_URL, { maxZoom: 20 }).addTo(lmap);
 
   // ---- state ----
   let ctx = null, masterGain = null;
@@ -571,8 +573,10 @@
 
   // ---- explore mode: click through the walk without being there ----
   // The same engine, driven by a virtual walker you move with map clicks instead of by GPS. The
-  // intro, every area, the dialogue queue and the outro all behave exactly as they do on location —
-  // only the footsteps are simulated. For listeners who want to hear a walk they can't travel to.
+  // intro, every area, the dialogue queue and the outro all behave exactly as they do on location;
+  // only the listener's *movement* is simulated. No sound is ever synthesised here or anywhere else
+  // in Songitude — every audible thing comes from the composer's own files in the bundle.
+  // For listeners who want to hear a walk they can't travel to.
   const EXPLORE_SPEED = { walking: 1.4, running: 3.5, biking: 6.7, driving: 13.4 };   // m/s; teleport is instant
   const FAR_M = 4828;                          // ~3 miles from the nearest area
   let explore = false, exploreOffered = false, exploreSpeed = "walking";
@@ -587,15 +591,23 @@
   function offerExplore(copy) {
     if (explore || exploreOffered || !walk || !shapes.length) return;
     exploreOffered = true;
-    $("exploreCopy").textContent = copy + " You can still hear all of it by clicking your way around the map.";
+    $("exploreCopy").textContent = copy +
+      " You can still hear all of it — the intro, every area as you reach it, and the outro — by" +
+      " clicking your way around the map.";
     $("exploreOverlay").hidden = false;
+  }
+
+  /// The speed picker and the way back to GPS live in the header beside the walk title.
+  function setExploreControls(on) {
+    $("exploreSpeed").hidden = !on;
+    $("exploreExit").hidden = !on;
   }
 
   function enterExplore() {
     $("exploreOverlay").hidden = true;
     explore = true;
     document.body.classList.add("exploring");
-    $("exploreBar").hidden = false;
+    setExploreControls(true);
     stopWatch(); virtual = null;
     // Start in the middle of the walk, so there is something to set off towards.
     const start = walk && walk.map && walk.map.center;
@@ -612,7 +624,7 @@
     $("exploreOverlay").hidden = true;
     explore = false;
     document.body.classList.remove("exploring");
-    $("exploreBar").hidden = true;
+    setExploreControls(false);
     stopExploreMove();
     exPos = null; exTarget = null;
     if (running) { startWatch(); setStatus("Listening — keep this page open and your screen on. 🎧"); }
@@ -1062,6 +1074,23 @@
   $("skipBackBtn").onclick = () => skip(-SKIP_S);
   $("skipFwdBtn").onclick = () => skip(SKIP_S);
   $("doneBtn").onclick = endSession;
+  // Phone menu. Closes after any choice, and on any tap outside it, so it never sits over the map.
+  const closeMenu = () => {
+    document.body.classList.remove("menu-open");
+    $("menuBtn").setAttribute("aria-expanded", "false");
+  };
+  $("menuBtn").onclick = (e) => {
+    e.stopPropagation();
+    const open = !document.body.classList.contains("menu-open");
+    document.body.classList.toggle("menu-open", open);
+    $("menuBtn").setAttribute("aria-expanded", String(open));
+  };
+  $("headerTools").onclick = (e) => { if (e.target.tagName !== "SELECT") closeMenu(); };
+  document.addEventListener("click", (e) => {
+    if (!document.body.classList.contains("menu-open")) return;
+    if (!$("headerTools").contains(e.target) && e.target !== $("menuBtn")) closeMenu();
+  });
+
   $("browseBtn").onclick = openPicker;
   // The title reopens the current walk's card (as in the app); the browse button stays the only
   // route to the full list.

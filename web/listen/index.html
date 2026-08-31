@@ -36,17 +36,58 @@
     .leaflet-tile-pane{filter:grayscale(1)}
     .user-marker{width:18px;height:18px;border-radius:50%;background:var(--accent);border:3px solid #fff;box-shadow:0 0 0 4px rgba(47,107,255,.30)}
 
-    header{position:absolute;top:0;left:0;right:0;z-index:500;display:flex;align-items:center;gap:10px;
+    header{position:absolute;top:0;left:0;right:0;z-index:500;display:flex;align-items:center;gap:8px;
       padding:calc(env(safe-area-inset-top) + 10px) 14px 10px;pointer-events:none}
     header .pill{pointer-events:auto;background:rgba(255,255,255,.86);backdrop-filter:blur(8px);
-      border:1px solid var(--line);border-radius:999px;padding:8px 14px;font-weight:650;display:flex;align-items:center;gap:8px;box-shadow:0 2px 10px rgba(20,30,55,.08)}
-    header .title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;justify-content:center}
-    header .icon{width:42px;height:42px;justify-content:center;padding:0}
+      border:1px solid var(--line);border-radius:999px;height:42px;padding:0 14px;font-weight:650;
+      display:flex;align-items:center;justify-content:center;gap:8px;box-shadow:0 2px 10px rgba(20,30,55,.08)}
+    header .title{flex:1 1 0;min-width:0;display:block;text-align:center;line-height:40px;padding:0 12px;
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    header .icon{width:42px;height:42px;flex:0 0 auto;justify-content:center;padding:0}
+    /* Explore controls in the top bar. `flex:none` so the walk title, not these, absorbs the squeeze. */
+    header .compact{flex:0 0 auto;min-width:0;height:42px;font-size:12.5px;padding:0 11px;font-weight:600;
+      color:var(--ink);appearance:none;-webkit-appearance:none;text-align:center}
+    /* A <select> sizes itself to its *widest option*, not the selected one, so "⚡ Teleport" was
+       silently making this far wider than it looks and pushing the row off screen. Pin it. */
+    header select.compact{width:94px;text-overflow:ellipsis}
+    /* Desktop: the tools sit inline beside the walk name; the hamburger is not needed. */
+    #headerTools{display:flex;align-items:center;gap:8px;pointer-events:auto}
+    header #menuBtn, header .menu-only{display:none}
+
+    /* Phone: only the walk title stays on the bar. Everything else — the Songitude link, the speed
+       picker, the way back to GPS and the walk list — collapses behind the hamburger, which is the
+       only way they all fit without the title being squeezed to nothing. */
+    @media (max-width:600px){
+      header{gap:8px;padding-left:12px;padding-right:12px}
+      #homeBtn{display:none}
+      header #menuBtn{display:flex}
+      header .menu-only{display:flex}
+      #headerTools{position:absolute;top:calc(100% + 6px);right:12px;flex-direction:column;
+        align-items:stretch;gap:6px;background:#fff;border:1px solid var(--line);border-radius:14px;
+        padding:8px;min-width:200px;box-shadow:0 14px 36px rgba(20,30,55,.22)}
+      body:not(.menu-open) #headerTools{display:none}
+      /* Inside the menu they are rows, not pills floating on the map. */
+      #headerTools .pill{width:100%;height:40px;border-radius:10px;background:#fff;
+        box-shadow:none;justify-content:flex-start;padding:0 12px;font-size:14px;font-weight:600}
+      #headerTools select.compact{width:100%;text-align:left}
+      #headerTools .icon{width:100%}
+      #menuHome{text-decoration:none;color:var(--ink);gap:10px}
+      #browseBtn::after{content:"All walks";font-weight:600}
+    }
 
     #controls{position:absolute;left:0;right:0;bottom:0;z-index:500;display:flex;flex-direction:column;align-items:center;gap:8px;
       padding:14px 14px calc(env(safe-area-inset-bottom) + 18px);pointer-events:none}
-    #status{pointer-events:auto;background:rgba(255,255,255,.86);backdrop-filter:blur(8px);border:1px solid var(--line);
-      border-radius:12px;padding:8px 14px;font-size:13px;color:var(--muted);text-align:center;max-width:92vw}
+    /* Reserve room so the play button never sits on top of the footer. The footer is always there
+       (it carries the map credit), so this is unconditional. */
+    #controls{padding-bottom:calc(env(safe-area-inset-bottom) + 74px)}
+    /* Full-bleed footer: square, edge to edge, so it reads as part of the page rather than a card. */
+    #footerBar{position:absolute;left:0;right:0;bottom:0;z-index:600;pointer-events:auto;
+      background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border-top:1px solid var(--line);
+      padding:9px 14px calc(env(safe-area-inset-bottom) + 9px);
+      display:flex;flex-direction:column;align-items:center;gap:2px;
+      font-size:13px;color:var(--muted);text-align:center}
+    #footerBar .attrib{font-size:11px;opacity:.7}
+    #footerBar .attrib a{color:inherit}
     #playBtn{pointer-events:auto;width:80px;height:80px;border-radius:50%;color:#fff;font-size:32px;
       background:var(--accent);box-shadow:0 8px 24px rgba(47,107,255,.4);display:grid;place-items:center}
     #playBtn:disabled{opacity:.5}
@@ -58,18 +99,14 @@
       color:var(--ink);display:grid;place-items:center;box-shadow:0 4px 14px rgba(20,30,55,.14)}
     .skipBtn:disabled{opacity:.4}
     /* Explore mode: the walk driven by map clicks instead of GPS, for listeners who can't be there. */
-    #exploreBar{pointer-events:auto;display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.92);
-      backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:999px;padding:6px 6px 6px 15px;
-      font-size:13px;color:var(--muted);box-shadow:0 4px 14px rgba(20,30,55,.14);max-width:min(94vw,540px)}
-    #exploreBar .hint{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    #exploreBar select,#exploreBar button{border:1px solid var(--line);border-radius:999px;padding:5px 11px;
-      background:#fff;color:var(--ink);font-size:13px;font-weight:600;flex:none}
-    .explore-copy{margin:0 0 14px;color:var(--muted);font-size:14px;line-height:1.55}
-    .explore-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+    .explore-copy{margin:0;color:var(--muted);font-size:14px;line-height:1.55}
+    /* nowrap: these two used to break onto separate lines at narrow widths. */
+    .explore-actions{display:flex;gap:8px;flex-wrap:nowrap;margin-top:16px}
+    .explore-actions .btn{flex:1;padding:10px 12px;font-size:14px;text-align:center;white-space:nowrap}
     /* The dot is a listener you move, not a GPS fix — square it off so it reads as a different thing. */
     body.exploring .user-marker{background:var(--ink);border-radius:6px;box-shadow:0 0 0 4px rgba(20,30,55,.18)}
     #doneBtn{pointer-events:auto;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border:1px solid var(--line);
-      border-radius:24px;padding:12px 18px;font-size:15px;font-weight:600;color:var(--ink,#1a2340);box-shadow:0 6px 18px rgba(20,30,55,.18)}
+      border-radius:999px;padding:12px 18px;font-size:15px;font-weight:600;color:var(--ink,#1a2340);box-shadow:0 6px 18px rgba(20,30,55,.18)}
     #doneBtn:disabled{opacity:.5}
 
     .overlay{position:absolute;inset:0;z-index:1000;background:rgba(20,30,55,.5);backdrop-filter:blur(4px);display:grid;place-items:center;padding:18px}
@@ -84,7 +121,7 @@
     .welcome h1{font-size:26px;margin:0 0 8px;letter-spacing:-.4px}
     .welcome p{color:var(--muted);line-height:1.6;margin:0 0 14px}
     .btn{display:inline-block;border-radius:12px;padding:12px 20px;font-weight:650;background:var(--accent);color:#fff;text-decoration:none}
-    .btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line);margin-left:8px}
+    .btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
     .note{background:#fff7e6;border:1px solid #ffe1a6;color:#7a5b12;border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.5;margin:14px 0;text-align:left}
 
     .walk-row{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--line);border-radius:12px;margin-bottom:10px;cursor:pointer;background:#fff;width:100%;text-align:left}
@@ -135,24 +172,26 @@
   <div id="map"></div>
 
   <header>
-    <a class="pill icon" href="/" title="Songitude home"><span class="dot"></span></a>
+    <a class="pill icon" id="homeBtn" href="/" title="Songitude home"><span class="dot"></span></a>
     <button class="pill title" id="titleBtn">Choose a walk ▾</button>
-    <button class="pill icon" id="browseBtn" title="Browse walks">🗂</button>
-  </header>
-
-  <div id="controls">
-    <div id="status" hidden></div>
-    <div id="exploreBar" hidden>
-      <span class="hint">Click the map to walk there</span>
-      <select id="exploreSpeed" aria-label="Move speed">
+    <!-- Phone: everything but the title collapses behind this. Desktop: it is hidden and the tools
+         sit inline beside the walk name. -->
+    <button class="pill icon" id="menuBtn" aria-label="Menu" aria-expanded="false">☰</button>
+    <div id="headerTools">
+      <a class="pill menu-only" id="menuHome" href="/">Songitude home</a>
+      <select class="pill compact" id="exploreSpeed" aria-label="Move speed" hidden>
         <option value="walking">🚶 Walk</option>
         <option value="running">🏃 Run</option>
         <option value="biking">🚲 Bike</option>
         <option value="driving">🚗 Drive</option>
         <option value="teleport">⚡ Teleport</option>
       </select>
-      <button id="exploreExit" title="Switch back to using your real location">Use my location</button>
+      <button class="pill compact" id="exploreExit" title="Switch back to using your real location" hidden>Use location</button>
+      <button class="pill icon" id="browseBtn" title="Browse walks">🗂</button>
     </div>
+  </header>
+
+  <div id="controls">
     <button id="doneBtn" hidden>Play Outro</button>
     <div id="playRow">
       <button class="skipBtn" id="skipBackBtn" disabled aria-label="Back 15 seconds" title="Back 15 seconds">↺15</button>
@@ -160,6 +199,15 @@
       <button class="skipBtn" id="skipFwdBtn" disabled aria-label="Forward 15 seconds" title="Forward 15 seconds">15↻</button>
     </div>
   </div>
+
+  <!-- Guidance runs along the bottom edge rather than floating in its own rounded card. The map
+       credit lives here too: left to Leaflet's own control it sits bottom-right over the map and
+       collides with this bar on narrow screens. -->
+  <footer id="footerBar">
+    <span id="status" hidden></span>
+    <span class="attrib">&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>
+      &copy; <a href="https://carto.com/attributions">CARTO</a></span>
+  </footer>
 
   <div id="toast" hidden></div>
 
@@ -199,13 +247,9 @@
       </div>
       <div class="sheet-body">
         <p class="explore-copy" id="exploreCopy"></p>
-        <div class="note">
-          You'll hear the whole walk — the intro, every area as you reach it, and the outro — exactly
-          as someone standing there would. Only the footsteps are simulated.
-        </div>
         <div class="explore-actions">
-          <button class="btn" id="exploreGo">Click through the walk</button>
-          <button class="btn ghost" id="exploreStay">Keep using my location</button>
+          <button class="btn" id="exploreGo">Click through</button>
+          <button class="btn ghost" id="exploreStay">Use location</button>
         </div>
       </div>
     </div>
