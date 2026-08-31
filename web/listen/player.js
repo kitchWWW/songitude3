@@ -597,11 +597,8 @@
     $("exploreOverlay").hidden = false;
   }
 
-  /// The speed picker and the way back to GPS live in the header beside the walk title.
-  function setExploreControls(on) {
-    $("exploreSpeed").hidden = !on;
-    $("exploreExit").hidden = !on;
-  }
+  /// The speed picker lives in the header beside the walk title (behind the menu on phones).
+  function setExploreControls(on) { $("exploreSpeed").hidden = !on; }
 
   function enterExplore() {
     $("exploreOverlay").hidden = true;
@@ -1065,7 +1062,6 @@
   $("exploreGo").onclick = enterExplore;
   $("exploreStay").onclick = () => { $("exploreOverlay").hidden = true; };
   $("exploreClose").onclick = () => { $("exploreOverlay").hidden = true; };
-  $("exploreExit").onclick = exitExplore;
   $("exploreSpeed").onchange = (e) => {
     exploreSpeed = e.target.value;
     if (exploreSpeed === "teleport") stopExploreMove();

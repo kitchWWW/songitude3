@@ -103,8 +103,6 @@
     /* nowrap: these two used to break onto separate lines at narrow widths. */
     .explore-actions{display:flex;gap:8px;flex-wrap:nowrap;margin-top:16px}
     .explore-actions .btn{flex:1;padding:10px 12px;font-size:14px;text-align:center;white-space:nowrap}
-    /* The dot is a listener you move, not a GPS fix — square it off so it reads as a different thing. */
-    body.exploring .user-marker{background:var(--ink);border-radius:6px;box-shadow:0 0 0 4px rgba(20,30,55,.18)}
     #doneBtn{pointer-events:auto;background:rgba(255,255,255,.92);backdrop-filter:blur(8px);border:1px solid var(--line);
       border-radius:999px;padding:12px 18px;font-size:15px;font-weight:600;color:var(--ink,#1a2340);box-shadow:0 6px 18px rgba(20,30,55,.18)}
     #doneBtn:disabled{opacity:.5}
@@ -178,7 +176,7 @@
          sit inline beside the walk name. -->
     <button class="pill icon" id="menuBtn" aria-label="Menu" aria-expanded="false">☰</button>
     <div id="headerTools">
-      <a class="pill menu-only" id="menuHome" href="/">Songitude home</a>
+      <a class="pill menu-only" id="menuHome" href="/"><span class="dot"></span>Songitude</a>
       <select class="pill compact" id="exploreSpeed" aria-label="Move speed" hidden>
         <option value="walking">🚶 Walk</option>
         <option value="running">🏃 Run</option>
@@ -186,7 +184,6 @@
         <option value="driving">🚗 Drive</option>
         <option value="teleport">⚡ Teleport</option>
       </select>
-      <button class="pill compact" id="exploreExit" title="Switch back to using your real location" hidden>Use location</button>
       <button class="pill icon" id="browseBtn" title="Browse walks">🗂</button>
     </div>
   </header>
