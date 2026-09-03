@@ -138,8 +138,12 @@ enum WalkDownloader {
         isDownloaded(walk.id) && cachedVersion(walk.id) == (walk.updatedAt ?? "")
     }
 
+    /// Deleting a walk also forgets that its intro was heard. Re-downloading is a fresh start, and
+    /// a listener who deliberately removed and re-added a walk expects it to open the way it did
+    /// the first time — the one-hour gate only exists to survive a resume, not a reinstall.
     static func deleteCache(_ id: String) {
         try? FileManager.default.removeItem(at: cacheDir(for: id))
+        UserDefaults.standard.removeObject(forKey: RenderEngine.introGateKey(id))
     }
     /// Every walk currently complete on disk.
     static func downloadedIds() -> Set<String> {
@@ -151,11 +155,17 @@ enum WalkDownloader {
         return Set(entries.map(\.lastPathComponent).filter(isDownloaded))
     }
 
-    /// Drop every downloaded walk (used by Settings → Advanced → Reset app).
+    /// Drop every downloaded walk (used by Settings → Advanced → Reset app), and every intro gate
+    /// with them, for the same reason deleteCache clears one.
     static func deleteAllCaches() {
         let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("walks", isDirectory: true)
         try? FileManager.default.removeItem(at: root)
+        let defaults = UserDefaults.standard
+        for key in defaults.dictionaryRepresentation().keys
+        where key.hasPrefix(RenderEngine.introGateKeyPrefix) {
+            defaults.removeObject(forKey: key)
+        }
     }
 
     /// Loads an already-downloaded walk from cache (nil if not fully present).
@@ -188,6 +198,10 @@ enum WalkDownloader {
                 if let art = map.albumArt, !art.isEmpty { rels.insert(art) }
                 if let intro = map.intro, !intro.isEmpty { rels.insert("audio/\(intro)") }
                 if let exit = map.exit, !exit.isEmpty { rels.insert("audio/\(exit)") }
+                // Label artwork, or an image label would quietly fall back to its text on device.
+                for l in map.labels ?? [] {
+                    if let img = l.image, !img.isEmpty { rels.insert("images/\(img)") }
+                }
                 let list = Array(rels)
                 for (i, rel) in list.enumerated() {
                     let dest = dir.appendingPathComponent(rel)

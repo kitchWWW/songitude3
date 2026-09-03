@@ -97,6 +97,9 @@
   // Dialogue shapes aren't colored individually — they show their playback state instead, using
   // this per-walk palette (authored in the Details tab, saved in map.json). One dialogue plays at a
   // time; the rest queue. Fixed fill opacities give "finished" its faded, see-through look.
+  // Holds `dialoguePlaying` while the intro narration runs, so a dialogue the listener already
+  // stands in queues behind it. Not a shape id, so nothing maps it back to a shape.
+  const INTRO_CHANNEL = "__intro__";
   const DIALOGUE_STATES = ["unplayed", "queued", "playing", "finished"];
   const DEFAULT_DIALOGUE_COLORS = { unplayed: "#8a63d2", queued: "#f5a623", playing: "#2ecc71", finished: "#ffffff" };
   const DIALOGUE_STATE_OPACITY = { unplayed: 0.25, queued: 0.42, playing: 0.6, finished: 0.08 };
@@ -1944,10 +1947,25 @@
     async playIntro() {
       if (!state.introAudio) return;
       const epoch = this._epoch;
+      // The intro takes the dialogue channel, so a dialogue the listener already stands in queues
+      // behind it rather than talking over it. Claimed before the decode is awaited. In the apps
+      // the intro fires at session start with the channel free; only the editor's manual "Do intro"
+      // can land mid-sentence, and there the running dialogue keeps the channel it already holds.
+      if (!this.dialoguePlaying) this.dialoguePlaying = INTRO_CHANNEL;
       const buf = await bufferFor(state.introAudio).catch(() => null);
-      if (!buf || epoch !== this._epoch) return;
+      if (epoch !== this._epoch) return;                    // stopped while it decoded
+      if (!buf) { this._releaseIntroChannel(); return; }
       if (this._introVoice) { try { this._introVoice.src.stop(); } catch (_) {} }
-      this._introVoice = this._playClipOnce(buf, state.introGain, () => { this._introVoice = null; });
+      this._introVoice = this._playClipOnce(buf, state.introGain, () => {
+        this._introVoice = null;
+        this._releaseIntroChannel();
+      });
+    },
+    /// Hand the dialogue channel back and start whatever queued while the intro played.
+    _releaseIntroChannel() {
+      if (this.dialoguePlaying !== INTRO_CHANNEL) return;   // already cleared by a stop
+      this.dialoguePlaying = null;
+      this._advanceDialogue();
     },
     // Fade + stop every sounding voice matching `pick`, over `dur` seconds.
     _fadeVoices(dur, pick) {

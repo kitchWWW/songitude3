@@ -12,6 +12,9 @@
   const DEFAULT_DIALOGUE_COLORS = { unplayed: "#8a63d2", queued: "#f5a623", playing: "#2ecc71", finished: "#ffffff" };
   const DIALOGUE_STATE_OPACITY = { unplayed: 0.2, queued: 0.42, playing: 0.6, finished: 0.08 };
   const INTRO_GATE_MS = 60 * 60 * 1000;   // don't replay a walk's intro within 1 hour (resume window)
+  // Holds `dialoguePlaying` while the intro narration runs, so a dialogue the listener already
+  // stands in queues behind it. Not a shape id, so nothing maps it back to a shape.
+  const INTRO_CHANNEL = "__intro__";
   const DONE_DELAY_MS = 30 * 1000;        // show the "Play Outro" button this long after play starts
   const SKIP_S = 15;                      // how far one press of a skip button moves every voice
 
@@ -325,11 +328,23 @@
     const key = "songitude.intro." + walk.id;
     const last = parseInt(localStorage.getItem(key) || "0", 10);
     if (Date.now() - last < INTRO_GATE_MS) return;   // resumed recently → don't replay
+    // Claim the dialogue channel before the decode: a fix landing in that gap would otherwise start
+    // a dialogue over the intro. The intro fires at session start, so the channel is free; the
+    // guard just means a dialogue somehow already speaking keeps the channel it holds.
+    if (!dialoguePlaying) dialoguePlaying = INTRO_CHANNEL;
     await ensureBuffer(file);
-    const buf = buffers.get(file); if (!buf || !running) return;
+    const buf = buffers.get(file);
+    if (!buf || !running) { releaseIntroChannel(); return; }
     try { localStorage.setItem(key, String(Date.now())); } catch (_) {}
     if (introVoice) { try { introVoice.src.stop(); } catch (_) {} }
-    introVoice = playClipOnce(buf, walk.map.introGain ?? 1, () => { introVoice = null; });
+    introVoice = playClipOnce(buf, walk.map.introGain ?? 1,
+                              () => { introVoice = null; releaseIntroChannel(); });
+  }
+  /// Hand the dialogue channel back and start whatever queued while the intro played.
+  function releaseIntroChannel() {
+    if (dialoguePlaying !== INTRO_CHANNEL) return;   // already cleared by a stop
+    dialoguePlaying = null;
+    advanceDialogue();
   }
   // End-of-walk: fade dialogue (1s) → exit clip → fade everything (5s) → stop the session.
   async function endSession() {

@@ -97,6 +97,14 @@ final class RenderEngine: ObservableObject {
     private var outroActive = false            // exit sequence running — freeze location-driven playback
     private var doneTimer: Timer?
     private static let introGate: TimeInterval = 3600   // don't replay a walk's intro within 1 hour
+    /// Holds `dialoguePlaying` while the intro narration runs. It is not a shape id, so every
+    /// lookup that maps the channel back to a shape simply finds nothing — which is what keeps the
+    /// queue stalled without the intro pretending to be a dialogue.
+    private static let introChannel = "__intro__"
+    /// Key for a walk's intro gate. Shared so deleting the walk can clear it: a re-download is a
+    /// fresh start and has to hear the intro again.
+    static let introGateKeyPrefix = "songitude.intro."
+    static func introGateKey(_ walkID: String) -> String { introGateKeyPrefix + walkID }
     private static let doneDelay: TimeInterval = 30     // offer "All done?" this long after start
 
     // MARK: - Session
@@ -894,16 +902,32 @@ final class RenderEngine: ObservableObject {
     /// Play the intro clip once, gated so it doesn't replay when resuming the same walk within an hour.
     private func maybePlayIntro() {
         guard let exp = experience, let file = exp.map.intro, !file.isEmpty else { return }
-        let key = "songitude.intro." + exp.id
+        let key = Self.introGateKey(exp.id)
         let now = Date().timeIntervalSince1970
         if now - UserDefaults.standard.double(forKey: key) < Self.introGate { return }
         UserDefaults.standard.set(now, forKey: key)
+        // The intro takes the dialogue channel, so a dialogue the listener is already standing in
+        // queues behind it rather than talking over it. Claimed before the clip loads: a GPS fix
+        // can land while it decodes, and that fix would otherwise start a dialogue. The intro fires
+        // at session start with the channel free; the guard just means a dialogue somehow already
+        // speaking keeps the channel it holds.
+        if dialoguePlaying == nil { dialoguePlaying = Self.introChannel }
         loadAndPlayClip(file, gain: Float(exp.map.introGain ?? 1.0),
                         assign: { [weak self] v in self?.introVoice = v },
                         onFinish: { [weak self] in
                             if let v = self?.introVoice { self?.detach(v) }
                             self?.introVoice = nil
+                            self?.releaseIntroChannel()
                         })
+    }
+
+    /// Hand the dialogue channel back and start whatever queued up while the intro played.
+    /// `loadAndPlayClip` calls its finish handler even when the clip can't load, so a missing or
+    /// undecodable intro releases the channel instead of stalling the queue forever.
+    private func releaseIntroChannel() {
+        guard dialoguePlaying == Self.introChannel else { return }   // already reset by a stop
+        dialoguePlaying = nil
+        advanceDialogue()
     }
 
     /// Cancel the pending "All done?" offer. Used while a modal (the walk's intro card) is up, so

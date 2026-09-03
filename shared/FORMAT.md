@@ -179,9 +179,17 @@ manifest exposes this as `portable`, which the apps use to split the catalog int
 
 Optional walk-level clips stored under `audio/`, independent of any shape:
 
-- **`intro`** — plays once, over the top of normal playback, when a walk **begins**. Players gate it
-  so it does *not* replay when you resume the same walk shortly after (a ~1 hour per-walk window),
-  but does play again on a later visit. (The editor's "Do intro" button always plays it.)
+- **`intro`** — plays once when a walk **begins**. It is treated as **dialogue**: it holds the
+  single dialogue channel for its whole length, so a `dialogue` area the listener is already
+  standing in when they press play is **queued** rather than started, and speaks only once the
+  intro has finished. Loops, synced loops and one-shots are unaffected and sound underneath it as
+  usual, and the intro itself is never ducked by a solo.
+  Players gate it so it does *not* replay when you resume the same walk shortly after (a ~1 hour
+  per-walk window), but it does play again on a later visit. Deleting a downloaded walk clears that
+  gate, so re-downloading hears the intro again — the window exists to survive a resume, not a
+  reinstall. (The editor's "Do intro" button always plays it, and takes the channel the same way.)
+  An intro whose clip is missing or won't decode releases the channel rather than stalling the
+  queue.
 - **`exit`** — the "end the session" clip. When the listener ends the session: any currently-playing
   dialogue fades out over **1 s**, then the exit clip starts while loops/other sounds keep playing;
   once the exit clip finishes, **all** remaining sound fades out over **5 s** and playback stops. In
