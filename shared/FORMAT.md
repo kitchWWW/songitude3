@@ -6,6 +6,8 @@ A bundle is a `.zip` file with this layout:
 bundle.zip
 ├── map.json          # the map definition (below)
 ├── albumart.jpg      # optional; lock-screen art (any image; original filename preserved in map.json)
+├── images/           # optional; artwork for image labels (PNG with alpha, or any image)
+│   └── <file>.png
 └── audio/
     ├── <file1>.mp3   # audio clips, original filenames preserved
     ├── <file2>.wav
@@ -83,9 +85,20 @@ bundle.zip
       "name": "The long way round",
       "points": [[lat, lng], [lat, lng], ...],   // ordered, open (never closed); at least 2
       "color": "#111111",
-      "width": 6,                   // stroke width in px / points
-      "startLabel": "Start here",   // "" or absent ⇒ a plain marker with no text
-      "endLabel": ""
+      "width": 6                    // stroke width in px / points
+    }
+  ],
+
+  "labels": [                       // optional; absent or [] ⇒ nothing drawn
+    {
+      "id": "l_7f3a",
+      "name": "Meet here",          // author-facing name; never drawn
+      "point": [lat, lng],          // where the marking sits
+      "text": "Meet here",          // the text to draw; ignored when `image` is set
+      "textColor": "#000000",       // absent ⇒ "#000000"
+      "bgColor": "#ffffff",         // absent ⇒ "#ffffff"; "none" ⇒ no plate behind the text
+      "image": "arrow.png",         // filename under images/, or absent/null ⇒ draw `text`
+      "size": 14                    // text ⇒ font size in px; image ⇒ width in px (absent ⇒ 14 / 48)
     }
   ]
 }
@@ -208,16 +221,30 @@ at which point the author can publish it as a new walk instead.
 Optional boolean on any shape, circle or polygon. Absent ⇒ `false` ⇒ the historical behaviour, where
 overlapping areas simply layer.
 
-While the listener stands inside **at least one** soloed area, only soloed areas are audible: every
-non-soloed area the listener is simultaneously inside ducks to silence. Step back out and it returns.
-Overlapping soloed areas do **not** duck each other — if two soloed areas overlap and the listener is
-in both, both play.
+While **at least one** soloed area is engaged, only soloed areas are audible: every non-soloed area the
+listener is simultaneously inside ducks to silence. Let the solo go and it returns. Overlapping soloed
+areas do **not** duck each other — if two soloed areas overlap and the listener is in both, both play.
+
+**When a soloed area is engaged** depends on its `mode`:
+
+- `loop`, `syncedLoop`, `oneshot` — while the listener is **inside** it.
+- `dialogue` — only while that dialogue is **actually playing** (state `playing`). A dialogue merely
+  *queues* on entry and plays once ever, so a soloed dialogue that is `unplayed`, `queued` or
+  `finished` ducks nothing. In practice: any dialogue already in progress finishes at full volume, the
+  duck begins when the soloed dialogue's own clip starts, and ends when that clip ends — including
+  when the clip runs on after the listener has left its area. This is the one per-mode exception, and
+  it is on the *engaging* side only.
 
 Solo is a **gain duck, not a stop**: the ducked voice keeps running underneath at zero, so it comes
 back exactly where it would have been rather than restarting. That matters most for `dialogue`, which
 plays once ever — a dialogue ducked by a solo keeps advancing silently and can finish while inaudible.
-There are deliberately **no per-mode exceptions**: loops, synced loops, one-shots and dialogue all duck
-the same way. Ducking in and out uses the ducked shape's own `fadeOut` / `fadeIn`.
+On the *ducked* side there are deliberately **no per-mode exceptions**: loops, synced loops, one-shots
+and dialogue all duck the same way, whether or not the listener is still inside them (a one-shot tail
+or a dialogue heard on the way out ducks like anything else). Ducking in and out uses the ducked
+shape's own `fadeOut` / `fadeIn`.
+
+Because a dialogue starts and finishes between location updates, all three engines recompute the solo
+latch on dialogue start/finish as well as on every location update.
 
 Walk-level `intro` and `exit` clips are never ducked — they aren't shapes and the listener isn't
 "inside" them.
@@ -275,8 +302,11 @@ walk means them to go. Nothing about playback changes whether a walk has routes 
 - `points` — ordered `[lat, lng]` pairs, **open**: the last point is never joined back to the first.
   Fewer than two points is not drawable and readers skip it.
 - `color` / `width` — per route, so several routes can be told apart. Defaults `#111111` and `6`.
-- `startLabel` / `endLabel` — text beside the first and last point. Empty or absent ⇒ a plain marker
-  with no text, which is the right choice when the path speaks for itself.
+- `startLabel` / `endLabel` — **removed.** Free-standing `labels` replaced them, since a caption is
+  rarely wanted welded to an endpoint. No reader draws them any more and the editor neither writes
+  them nor carries them through an import, so a walk published with them loses those two captions
+  and keeps everything else. This is the one deliberate exception to the compatibility rule at the
+  top of this file; re-add the captions as labels if an old walk needs them.
 
 Routes are stroked with **round caps and round joins** in every renderer (Leaflet `lineCap`/
 `lineJoin`, `MKPolylineRenderer.lineCap`/`lineJoin`), so bends read as smooth curves rather than
@@ -284,6 +314,35 @@ mitred corners. They are drawn **beneath** the sound areas.
 
 A route on a transportable walk (one with a `startAnchor`) is transposed along with everything else,
 so the path lands around the listener rather than staying where it was authored.
+
+### Labels (`labels`)
+
+Optional array of free-standing map markings. Absent or empty ⇒ nothing is drawn, which is what
+every walk published before this field did.
+
+Like a route, a label is **purely visual**: no audio, no containment test, no bearing on playback.
+It is a caption or a piece of artwork pinned to one point, for the things a sound area cannot say —
+"start here", "mind the steps", an arrow, a logo.
+
+- `point` — a single `[lat, lng]`. A label without one is not drawable and readers skip it.
+- `text` — what to draw. Drawn on a rounded plate so it stays readable over any basemap.
+- `textColor` / `bgColor` — default `#000000` on `#ffffff`. `bgColor: "none"` drops the plate and
+  draws the text bare, for a caption that should sit directly on the map.
+- `image` — a filename under `images/`. When set it is drawn **instead of** the text, at its natural
+  aspect ratio, with alpha preserved (PNG transparency survives on all three surfaces). `text` is
+  kept in the bundle either way, so clearing the image brings the caption back.
+- `size` — one number whose meaning follows the kind: font size in px for text (default 14), width
+  in px for an image (default 48). Height follows the image's aspect ratio.
+
+Labels keep a **fixed size on screen**: they do not grow or shrink with zoom, which is what makes
+them readable at every scale. They are drawn **above** the sound areas, so a caption is never buried
+under a fill, and they are never interactive for a listener.
+
+A label on a transportable walk (one with a `startAnchor`) is transposed along with everything else.
+
+An image a label names but the bundle does not carry falls back to the label's `text`, drawn at the
+14 px text default rather than at `size` — `size` was authored as an image width and means nothing
+as a font size. If there is no text either, the label is skipped rather than drawn empty.
 
 Geometry is interpreted in WGS-84 lat/lng. Containment: circles use great-circle distance ≤
 `radius`; polygons use even-odd ray casting on lat/lng.

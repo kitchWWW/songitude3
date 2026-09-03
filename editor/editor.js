@@ -10,7 +10,7 @@
   const DEFAULT_INTRO_COLOR = "#101014";
   const state = {
     mode: "edit",              // "edit" | "listen"
-    tool: "select",            // "select" | "pan" | "polygon" | "circle" | "route"
+    tool: "select",            // "select" | "pan" | "polygon" | "circle" | "route" | "label"
     name: "",
     creator: "",
     about: "",
@@ -25,8 +25,10 @@
     zoom: 15,
     shapes: [],                // see makeShape()
     routes: [],                // see makeRoute() — purely visual suggested paths, never audible
+    labels: [],                // see makeLabel() — purely visual captions / artwork pinned to a point
     selectedIds: new Set(),    // multi-selection
     selectedRouteId: null,     // routes are selected one at a time, separately from sound areas
+    selectedLabelId: null,     // ditto labels
     albumArt: null,            // { name, blob, url } | null
     introAudio: null,          // walk-level intro clip filename (in audioStore), or null
     introGain: 1.0,            // 0..1 playback level for the intro clip
@@ -82,6 +84,16 @@
   const ROUTE_WIDTH_RANGE = [2, 16];
   let routeCounter = 0;
 
+  // Labels are the other kind of map marking: a caption or a small image pinned to one point. Black
+  // on white by default, which stays legible over any basemap. `size` means font size for text and
+  // width for an image, so one control covers both kinds.
+  const DEFAULT_LABEL_TEXT_COLOR = "#000000";
+  const DEFAULT_LABEL_BG_COLOR = "#ffffff";
+  const DEFAULT_LABEL_TEXT_SIZE = 14;
+  const DEFAULT_LABEL_IMAGE_SIZE = 48;
+  const LABEL_SIZE_RANGE = [8, 160];
+  let labelCounter = 0;
+
   // Dialogue shapes aren't colored individually — they show their playback state instead, using
   // this per-walk palette (authored in the Details tab, saved in map.json). One dialogue plays at a
   // time; the rest queue. Fixed fill opacities give "finished" its faded, see-through look.
@@ -98,6 +110,9 @@
   const decoded = new Map();
   // album-art blobs kept by name so undo/redo can restore a previous cover
   const artStore = new Map();
+  // filename -> { blob, url } for label artwork, bundled under images/. Never revoked, so undo can
+  // bring a cleared image back.
+  const imageStore = new Map();
 
   // ---- undo/redo history: JSON snapshots of the editable state ----------
   const HISTORY_LIMIT = 500;   // ample; well beyond the 50-step minimum
@@ -208,8 +223,6 @@
       points,                              // [[lat,lng], ...] in walking order; at least 2
       color: DEFAULT_ROUTE_COLOR,
       width: DEFAULT_ROUTE_WIDTH,
-      startLabel: "",                      // "" ⇒ a plain endpoint marker with no text
-      endLabel: "",
       layer: null,
       markers: null,
     };
@@ -247,17 +260,14 @@
   }
 
   /// The two endpoint markers: a solid dot in the route's own colour, sized off the line's width so
-  /// it reads as the end of the stroke rather than a badge stuck on it. A non-empty label rides
-  /// alongside. Non-interactive, so they never swallow a click meant for the line or a handle under
-  /// them. The icon's height is fixed in CSS, which is what lets iconAnchor keep the dot — not the
-  /// label — sitting on the point.
+  /// it reads as the end of the stroke rather than a badge stuck on it. Non-interactive, so they
+  /// never swallow a click meant for the line or a handle under them. A caption at an endpoint is a
+  /// Label now, placed wherever it reads best rather than welded to the point.
   function routeEndDotSize(r) { return clamp(r.width || DEFAULT_ROUTE_WIDTH, 6, 14); }
   function routeEndIcon(r, kind) {
-    const label = (kind === "start" ? r.startLabel : r.endLabel) || "";
     const d = routeEndDotSize(r);
-    const dot = `<i style="background:${r.color};width:${d}px;height:${d}px"></i>`;
-    const text = label ? `<b style="color:${r.color}">${escapeHtml(label)}</b>` : "";
-    return L.divIcon({ className: "route-end route-end-" + kind, html: dot + text,
+    return L.divIcon({ className: "route-end route-end-" + kind,
+                       html: `<i style="background:${r.color};width:${d}px;height:${d}px"></i>`,
                        iconSize: null, iconAnchor: [d / 2, 10] });
   }
   function buildRouteMarkers(r) {
@@ -282,9 +292,10 @@
 
   function selectRoute(id) {
     state.selectedIds.clear();
+    state.selectedLabelId = null;
     state.selectedRouteId = id;
     applySelection();
-    renderRoutes();
+    renderMarkings();
   }
 
   function removeRoute(id) {
@@ -299,7 +310,7 @@
     const r = routeById(id); if (!r) return;
     if (!confirm(`Delete “${r.name}”?\n\nThis only removes the drawn path; no audio is affected.`)) return;
     removeRoute(id);
-    renderRoutes();
+    renderMarkings();
     applySelection();
     commit();
   }
@@ -333,8 +344,7 @@
 
   function serializeRoute(r) {
     return { id: r.id, name: r.name, points: r.points.map(([la, ln]) => [la, ln]),
-             color: r.color, width: r.width,
-             startLabel: r.startLabel || "", endLabel: r.endLabel || "" };
+             color: r.color, width: r.width };
   }
 
   /// Rebuild every route from serialized form. Shared by import and undo/redo, so the two can't
@@ -352,13 +362,180 @@
         points: raw.points.map((p) => [p[0], p[1]]),
         color: raw.color || DEFAULT_ROUTE_COLOR,
         width: raw.width ?? DEFAULT_ROUTE_WIDTH,
-        startLabel: raw.startLabel || "",
-        endLabel: raw.endLabel || "",
         layer: null, markers: null,
       };
       buildRouteLayer(r);
       state.routes.push(r);
     }
+  }
+
+  // ============================================================ LABEL MODEL ==
+  // A label is the other kind of map marking: a caption on a plate, or a small image, pinned to one
+  // point. Purely visual exactly like a route — no audio, no containment test, no bearing on
+  // playback. Labels replaced the routes' old start/end captions, which could only ever sit on an
+  // endpoint; those were removed outright, so importing a walk that had them drops those two
+  // captions and nothing else.
+  function labelById(id) { return state.labels.find((l) => l.id === id); }
+
+  function makeLabel(latlng) {
+    labelCounter += 1;
+    const label = {
+      id: "l_" + Math.abs(hashStr("label" + labelCounter + latlng.lat)).toString(36),
+      name: `Label ${labelCounter}`,
+      point: [latlng.lat, latlng.lng],
+      text: "New label",
+      textColor: DEFAULT_LABEL_TEXT_COLOR,
+      bgColor: DEFAULT_LABEL_BG_COLOR,        // "none" ⇒ bare text, no plate
+      image: null,                            // filename in imageStore ⇒ drawn instead of the text
+      size: DEFAULT_LABEL_TEXT_SIZE,          // text ⇒ font size, image ⇒ width; both in px
+      layer: null,
+    };
+    buildLabelLayer(label);
+    state.labels.push(label);
+    return label;
+  }
+
+  function destroyLabelLayer(l) { if (l.layer) { map.removeLayer(l.layer); l.layer = null; } }
+
+  function labelSize(l) {
+    return l.size ?? (l.image ? DEFAULT_LABEL_IMAGE_SIZE : DEFAULT_LABEL_TEXT_SIZE);
+  }
+
+  /// A divIcon rather than a path, which is what keeps a marking the same size on screen at every
+  /// zoom — a caption that shrank with the map would be unreadable zoomed out. `iconSize: null`
+  /// lets the plate size itself to its content; the CSS centres it on the point.
+  function labelIcon(l) {
+    const rec = l.image ? imageStore.get(l.image) : null;
+    const size = labelSize(l);
+    const inner = rec
+      ? `<img src="${rec.url}" style="width:${size}px" alt="" />`
+      : `<span style="font-size:${size}px;color:${l.textColor};` +
+        (l.bgColor === "none" ? "" : `background:${l.bgColor}`) + `">${escapeHtml(l.text || "")}</span>`;
+    return L.divIcon({ className: "map-label" + (state.selectedLabelId === l.id ? " selected" : ""),
+                       html: inner, iconSize: null });
+  }
+
+  /// Interactive only while authoring: in Listen mode a marking must never swallow the map click
+  /// that moves the virtual listener, exactly as it must never be tappable for a real listener.
+  function buildLabelLayer(l) {
+    destroyLabelLayer(l);
+    const interactive = state.mode === "edit";
+    l.layer = L.marker(l.point, { icon: labelIcon(l), interactive, keyboard: false,
+                                  zIndexOffset: 1000 }).addTo(map);
+    if (!interactive) return;
+    l.layer.on("mousedown", (e) => {
+      if (state.mode !== "edit" || state.tool !== "select") return;
+      L.DomEvent.stop(e);
+      selectLabel(l.id);
+      startLabelDrag(l, e);
+    });
+  }
+
+  function refreshLabel(l) {
+    if (!l.layer) { buildLabelLayer(l); return; }
+    l.layer.setLatLng(l.point);
+    l.layer.setIcon(labelIcon(l));
+  }
+  function refreshLabels() { for (const l of state.labels) refreshLabel(l); }
+
+  /// Drag a marking to a new point. The map's own dragging is suspended for the gesture so it moves
+  /// the label rather than the basemap under it.
+  function startLabelDrag(l, e) {
+    const start = e.latlng, origin = [l.point[0], l.point[1]];
+    map.dragging.disable();
+    const onMove = (ev) => {
+      l.point = [origin[0] + (ev.latlng.lat - start.lat), origin[1] + (ev.latlng.lng - start.lng)];
+      refreshLabel(l);
+    };
+    const onUp = () => { map.off("mousemove", onMove); map.dragging.enable(); commit(); };
+    map.on("mousemove", onMove);
+    map.once("mouseup", onUp);
+  }
+
+  function selectLabel(id) {
+    state.selectedIds.clear();
+    state.selectedRouteId = null;
+    state.selectedLabelId = id;
+    applySelection();
+    renderMarkings();
+  }
+
+  function removeLabel(id) {
+    const l = labelById(id); if (!l) return;
+    destroyLabelLayer(l);
+    state.labels = state.labels.filter((x) => x.id !== id);
+    if (state.selectedLabelId === id) state.selectedLabelId = null;
+  }
+
+  function deleteLabel(id) {
+    const l = labelById(id); if (!l) return;
+    if (!confirm(`Delete “${l.name}”?\n\nThis only removes the marking; no audio is affected.`)) return;
+    removeLabel(id);
+    renderMarkings();
+    commit();
+  }
+
+  // Label artwork. Kept in imageStore by filename and bundled under images/, mirroring how audio
+  // and album art are held, so undo/redo can bring a cleared image back without a re-upload.
+  function pickImageFor(l) {
+    const input = document.createElement("input");
+    input.type = "file"; input.accept = "image/*";
+    input.onchange = () => { if (input.files[0]) assignLabelImage(l, input.files[0]); };
+    input.click();
+  }
+  function assignLabelImage(l, file) {
+    if (!imageStore.has(file.name)) imageStore.set(file.name, { blob: file, url: URL.createObjectURL(file) });
+    const wasTextSize = labelSize(l) === DEFAULT_LABEL_TEXT_SIZE;
+    l.image = file.name;
+    if (wasTextSize) l.size = DEFAULT_LABEL_IMAGE_SIZE;   // a font size makes a useless image width
+    refreshLabel(l);
+    renderMarkings();
+    commit();
+  }
+  function clearLabelImage(l) {
+    if (!l.image) return;
+    l.image = null;
+    if (labelSize(l) === DEFAULT_LABEL_IMAGE_SIZE) l.size = DEFAULT_LABEL_TEXT_SIZE;
+    refreshLabel(l);
+    renderMarkings();
+    commit();
+  }
+
+  function serializeLabel(l) {
+    return { id: l.id, name: l.name, point: [l.point[0], l.point[1]],
+             text: l.text || "", textColor: l.textColor, bgColor: l.bgColor,
+             image: l.image || null, size: labelSize(l) };
+  }
+
+  /// Rebuild every label from serialized form. Shared by import and undo/redo, so the two can't
+  /// drift apart the way parallel hand-written copies do.
+  function hydrateLabels(list) {
+    state.labels.forEach(destroyLabelLayer);
+    state.labels = [];
+    labelCounter = 0;
+    for (const raw of list || []) {
+      if (!Array.isArray(raw.point) || raw.point.length !== 2) continue;   // nothing to place
+      labelCounter += 1;
+      // An image the bundle doesn't carry falls back to the text, as FORMAT.md specifies.
+      const image = raw.image && imageStore.has(raw.image) ? raw.image : null;
+      const l = {
+        id: raw.id || ("l_" + labelCounter),
+        name: raw.name || `Label ${labelCounter}`,
+        point: [raw.point[0], raw.point[1]],
+        text: raw.text || "",
+        textColor: raw.textColor || DEFAULT_LABEL_TEXT_COLOR,
+        bgColor: raw.bgColor || DEFAULT_LABEL_BG_COLOR,
+        image,
+        // A width authored for artwork is meaningless as a font size, so a label whose image the
+        // bundle didn't carry falls back to the text at the ordinary default.
+        size: (raw.image && !image) ? DEFAULT_LABEL_TEXT_SIZE
+                                    : (raw.size ?? (image ? DEFAULT_LABEL_IMAGE_SIZE : DEFAULT_LABEL_TEXT_SIZE)),
+        layer: null,
+      };
+      buildLabelLayer(l);
+      state.labels.push(l);
+    }
+    if (!labelById(state.selectedLabelId)) state.selectedLabelId = null;
   }
 
   // ---- selection (multi) ------------------------------------------------
@@ -371,11 +548,12 @@
   }
   function setSelection(ids) { state.selectedRouteId = null; state.selectedIds = new Set(ids); applySelection(); }
   function clearSelection() {
-    if (!state.selectedIds.size && !state.selectedRouteId) return;
+    if (!state.selectedIds.size && !state.selectedRouteId && !state.selectedLabelId) return;
     state.selectedIds.clear();
     state.selectedRouteId = null;
+    state.selectedLabelId = null;
     applySelection();
-    renderRoutes();
+    renderMarkings();
   }
 
   function applySelection() {
@@ -386,6 +564,9 @@
     for (const r of state.routes) if (r.layer) r.layer.setStyle(routeStyle(r));
     document.querySelectorAll(".route-card").forEach((c) =>
       c.classList.toggle("selected", c.dataset.id === state.selectedRouteId));
+    refreshLabels();
+    document.querySelectorAll(".label-card").forEach((c) =>
+      c.classList.toggle("selected", c.dataset.id === state.selectedLabelId));
     updateBulkBar();
     refreshEditHandles();
   }
@@ -664,7 +845,7 @@
   function setTool(tool) {
     cancelDraw();
     state.tool = tool;
-    ["Select", "Pan", "Polygon", "Circle", "Route"].forEach((t) =>
+    ["Select", "Pan", "Polygon", "Circle", "Route", "Label"].forEach((t) =>
       $("tool" + t).classList.toggle("active", tool === t.toLowerCase()));
     // Kept short: the hint shares one row with the tool buttons, and a long one squeezes them.
     const hints = {
@@ -673,6 +854,7 @@
       polygon: "Click each vertex; click the first to close.",
       circle: "Click the center, then the edge.",
       route: "Click each point; Enter to finish.",
+      label: "Click where the marking should sit.",
     };
     $("toolHint").textContent = hints[tool];
     mapEl.style.cursor = tool === "select" ? "" : tool === "pan" ? "grab" : "crosshair";
@@ -694,6 +876,7 @@
     if (state.tool === "polygon") polygonClick(e.latlng);
     else if (state.tool === "circle") circleClick(e.latlng);
     else if (state.tool === "route") routeClick(e.latlng);
+    else if (state.tool === "label") labelClick(e.latlng);
     else if (state.tool === "select") {
       // Plain click on empty map clears the selection; Shift-click leaves it (used with marquee).
       if (!(e.originalEvent && e.originalEvent.shiftKey)) clearSelection();
@@ -814,11 +997,22 @@
     cancelDraw();
     if (points.length < 2) return;     // a single click isn't a path
     const r = makeRoute(points);
-    renderRoutes();
-    switchTab("routes");
+    renderMarkings();
+    switchTab("markings");
     selectRoute(r.id);
     commit();
     toast("Route added — set its colour, thickness and end labels on the Routes tab.", "ok");
+  }
+
+  /// One click is the whole gesture — a label has a single point, so there is nothing to rubber-band.
+  function labelClick(latlng) {
+    const l = makeLabel(latlng);
+    setTool("select");
+    renderMarkings();
+    switchTab("markings");
+    selectLabel(l.id);
+    commit();
+    toast("Label added — set its text, colours or image on the Markings tab.", "ok");
   }
 
   function circleClick(latlng) {
@@ -853,12 +1047,16 @@
   }
 
   // ---- routes panel ------------------------------------------------------
-  function renderRoutes() {
-    const list = $("routeList");
-    list.innerHTML = "";
-    $("routeCount").textContent = state.routes.length;
+  function renderMarkings() {
+    const rlist = $("routeList");
+    rlist.innerHTML = "";
+    for (const r of state.routes) rlist.appendChild(cardForRoute(r));
     $("routeEmpty").hidden = state.routes.length > 0;
-    for (const r of state.routes) list.appendChild(cardForRoute(r));
+    const llist = $("labelList");
+    llist.innerHTML = "";
+    for (const l of state.labels) llist.appendChild(cardForLabel(l));
+    $("labelEmpty").hidden = state.labels.length > 0;
+    $("markingCount").textContent = state.routes.length + state.labels.length;
   }
 
   function cardForRoute(r) {
@@ -907,23 +1105,9 @@
     style.append(colorLab, widthLab);
     card.append(style);
 
-    // endpoint labels — leaving one empty gives a plain marker with no text
-    const labels = el("div", "params");
-    for (const [key, placeholder] of [["startLabel", "Start label"], ["endLabel", "End label"]]) {
-      const lab = el("label", null, key === "startLabel" ? "Start " : "End ");
-      const inp = document.createElement("input");
-      inp.type = "text"; inp.className = "route-label-input";
-      inp.value = r[key] || ""; inp.placeholder = placeholder; inp.maxLength = 40;
-      inp.onclick = (e) => e.stopPropagation();
-      inp.oninput = () => { r[key] = inp.value; refreshRouteMarkers(r); };
-      inp.onchange = () => commit();
-      lab.append(inp);
-      labels.append(lab);
-    }
-    card.append(labels);
     card.append(el("span", "field-hint",
-      "Leave a label empty for a plain marker. Click the line while this route is selected to add "
-      + "a point; select a point and press Delete to remove it."));
+      "Click the line while this route is selected to add a point; select a point and press Delete "
+      + "to remove it. For a caption, add a Label instead."));
 
     const actions = el("div", "shape-actions");
     const editBtn = el("button", "edit-btn", "✎ Edit points");
@@ -931,6 +1115,122 @@
     editBtn.onclick = (e) => { e.stopPropagation(); selectRoute(r.id); toast("Drag the handles to reshape the route.", "ok"); };
     actions.append(editBtn);
     card.append(actions);
+    return card;
+  }
+
+
+  function cardForLabel(l) {
+    const card = el("div", "card label-card");
+    card.dataset.id = l.id;
+    if (state.selectedLabelId === l.id) card.classList.add("selected");
+    card.onclick = () => selectLabel(l.id);
+
+    const head = el("div", "card-head");
+    const name = document.createElement("input");
+    name.className = "name"; name.type = "text"; name.value = l.name;
+    name.onclick = (e) => e.stopPropagation();
+    name.oninput = () => { l.name = name.value; };
+    name.onchange = () => commit();
+    const del = el("button", "del", "✕");
+    del.title = "Delete this label";
+    del.onclick = (e) => { e.stopPropagation(); deleteLabel(l.id); };
+    head.append(name, del);
+    card.append(head);
+
+    // the caption itself
+    const textRow = el("div", "params");
+    const textLab = el("label", null, "Text ");
+    const text = document.createElement("input");
+    text.type = "text"; text.className = "route-label-input";
+    text.value = l.text || ""; text.placeholder = "Meet here"; text.maxLength = 80;
+    text.onclick = (e) => e.stopPropagation();
+    text.oninput = () => { l.text = text.value; refreshLabel(l); };
+    text.onchange = () => commit();
+    textLab.append(text);
+    textRow.append(textLab);
+    card.append(textRow);
+
+    // text + plate colours. The plate can be switched off for a caption that should sit bare on
+    // the map; the colour input stays, disabled, so switching it back on restores the last colour.
+    const colors = el("div", "params");
+    const textColorLab = el("label", null, "Text ");
+    const textColor = document.createElement("input");
+    textColor.type = "color"; textColor.value = l.textColor;
+    textColor.onclick = (e) => e.stopPropagation();
+    textColor.oninput = (e) => { e.stopPropagation(); l.textColor = textColor.value.toLowerCase(); refreshLabel(l); };
+    textColor.onchange = (e) => { e.stopPropagation(); commit(); };
+    textColorLab.append(textColor);
+
+    const bgLab = el("label", null, "Background ");
+    const bg = document.createElement("input");
+    bg.type = "color";
+    bg.value = l.bgColor === "none" ? DEFAULT_LABEL_BG_COLOR : l.bgColor;
+    bg.disabled = l.bgColor === "none";
+    bg.onclick = (e) => e.stopPropagation();
+    bg.oninput = (e) => { e.stopPropagation(); l.bgColor = bg.value.toLowerCase(); refreshLabel(l); };
+    bg.onchange = (e) => { e.stopPropagation(); commit(); };
+    bgLab.append(bg);
+
+    const plateLab = el("label", "check-inline");
+    const plate = document.createElement("input");
+    plate.type = "checkbox"; plate.checked = l.bgColor !== "none";
+    plate.onclick = (e) => e.stopPropagation();
+    plate.onchange = (e) => {
+      e.stopPropagation();
+      l.bgColor = plate.checked ? bg.value.toLowerCase() : "none";
+      bg.disabled = !plate.checked;
+      refreshLabel(l); commit();
+    };
+    plateLab.title = "Off draws the text straight onto the map, with no plate behind it.";
+    plateLab.append(plate, el("span", null, " Plate"));
+    colors.append(textColorLab, bgLab, plateLab);
+    card.append(colors);
+
+    // one size control, because a label is either text or an image and never both
+    const sizeRow = el("div", "params");
+    const sizeLab = el("label", null, l.image ? "Width " : "Text size ");
+    const size = document.createElement("input");
+    size.type = "range";
+    size.min = LABEL_SIZE_RANGE[0]; size.max = LABEL_SIZE_RANGE[1]; size.step = 1;
+    size.value = labelSize(l);
+    const sizeVal = el("span", null, labelSize(l) + " px");
+    size.onclick = (e) => e.stopPropagation();
+    size.oninput = (e) => {
+      e.stopPropagation();
+      l.size = parseInt(size.value, 10);
+      sizeVal.textContent = l.size + " px";
+      refreshLabel(l);
+    };
+    size.onchange = (e) => { e.stopPropagation(); commit(); };
+    sizeLab.append(size, sizeVal);
+    sizeRow.append(sizeLab);
+    card.append(sizeRow);
+
+    // artwork, drawn instead of the text when set. The text is kept either way, so clearing the
+    // image brings the caption straight back.
+    const art = el("div", "params");
+    if (l.image && imageStore.has(l.image)) {
+      const thumb = document.createElement("img");
+      thumb.className = "label-thumb";
+      thumb.src = imageStore.get(l.image).url;
+      thumb.alt = "";
+      art.append(thumb);
+    }
+    const pick = el("button", "edit-btn", l.image ? "⇧ Replace image" : "⇧ Use an image");
+    pick.title = "Draw a PNG (transparency is kept) instead of the text";
+    pick.onclick = (e) => { e.stopPropagation(); pickImageFor(l); };
+    art.append(pick);
+    if (l.image) {
+      const clear = el("button", "edit-btn", "✕ Image");
+      clear.title = "Go back to drawing the text";
+      clear.onclick = (e) => { e.stopPropagation(); clearLabelImage(l); };
+      art.append(clear);
+    }
+    card.append(art);
+    if (l.image) {
+      card.append(el("span", "field-hint",
+        "The image is drawn instead of the text. Clear it to show the caption again."));
+    }
     return card;
   }
 
@@ -1330,6 +1630,15 @@
     return _ctx;
   }
 
+  // Chrome mis-loops an AudioBuffer whose frame count is odd: instead of wrapping it pins the read
+  // head at the end and repeats the last handful of samples forever — a stuck, high-pitched buzz
+  // from the second pass onward. Naming the loop window explicitly sidesteps it. The frame this
+  // gives up is a single sample (~0.02 ms) and inaudible; even-length buffers loop as before.
+  function loopWholeBuffer(src, buf) {
+    src.loop = true;
+    if (buf.length % 2) { src.loopStart = 0; src.loopEnd = (buf.length - 1) / buf.sampleRate; }
+  }
+
   // A crossfade loop: overlapping copies of `buf` scheduled under `destGain`. Each copy fades in
   // over the crossfade window as the previous one fades out, so there's no seam. Returns an object
   // exposing stop(when) so it drops into the same slots as a plain looping AudioBufferSourceNode.
@@ -1381,49 +1690,87 @@
     outroActive: false,      // the exit sequence is running — freeze location-driven playback
     _introVoice: null,
     _exitVoice: null,
-    _soloOn: false,          // the listener is standing inside at least one soloed area
+    _soloOn: false,          // at least one soloed area is engaged (see _soloEngaged)
+    _duckMoved: new Set(),   // shape ids whose duck factor moved during the current location pass
+    // Bumped by stopAll(). Async work started before a stop captures this and bails if it moved,
+    // so a buffer decode that lands after you leave Listen mode can't resurrect a voice.
+    _epoch: 0,
 
     // 1 normally; 0 while a solo elsewhere is ducking this shape. Applied to every mode alike —
     // a ducked voice keeps running at zero rather than stopping, so it returns where it would have
     // been (a dialogue picks up mid-line instead of restarting).
     _duck(s) { return (this._soloOn && !s.solo) ? 0 : 1; },
 
+    // Is this shape's solo engaging the duck right now? Containment is the test for every mode but
+    // dialogue: a dialogue only *queues* on entry and plays once ever, so a soloed dialogue must
+    // duck the walk while its own clip sounds — not while it waits its turn, and not once it's
+    // finished. `insideIds` is the fresh containment set during a location pass; without it we use
+    // the last one seen, which is what a dialogue starting between location updates needs.
+    _soloEngaged(s, insideIds) {
+      if (!s.solo) return false;
+      if (s.mode === "dialogue") return !!(s._rt && s._rt.dstate === "playing");
+      return insideIds ? insideIds.has(s.id) : !!(s._rt && s._rt.inside);
+    },
+
+    // Recompute the solo latch and move every voice whose duck factor changed. Called from the
+    // location pass and from the dialogue queue (start/finish), since a soloed dialogue engages and
+    // releases the duck between location updates. Ducking in and out uses the ducked shape's own
+    // fades, so it sounds like leaving and re-entering it.
+    _applySolo(insideIds) {
+      this._soloOn = state.shapes.some((s) => this._soloEngaged(s, insideIds));
+      for (const s of state.shapes) {
+        if (!s._rt) s._rt = { inside: false, armed: true, source: null, gain: null, dstate: "unplayed" };
+        const rt = s._rt;
+        const duck = this._duck(s);
+        // Only act once a baseline is recorded — the first pass just notes where this shape sits.
+        const changed = rt.duck !== undefined && rt.duck !== duck;
+        rt.duck = duck;
+        if (!changed) continue;
+        this._duckMoved.add(s.id);
+        if (!rt.gain) continue;
+        const inNow = insideIds ? insideIds.has(s.id) : rt.inside;
+        const target = (s.mode === "loop" || s.mode === "syncedLoop")
+          ? (inNow && this.listener ? this._targetGain(s, this.listener) : 0)
+          : s.gain * duck;
+        this._rampTo(rt.gain, target, duck ? Math.max(0.02, s.fadeIn) : Math.max(0.02, s.fadeOut));
+      }
+    },
+
     async setListener(latlng) {
       this.listener = latlng;
       if (this.outroActive) return;   // during the outro, location changes are frozen
+      const epoch = this._epoch;
       const ctx = audioCtx();
       const insideIds = new Set();
       for (const s of state.shapes) if (contains(s, latlng)) insideIds.add(s.id);
-      this._soloOn = state.shapes.some((s) => s.solo && insideIds.has(s.id));
 
       // ensure buffers for anything we might start
       await Promise.all(state.shapes
         .filter((s) => s.audioFile && insideIds.has(s.id))
         .map((s) => bufferFor(s.audioFile).catch(() => null)));
+      if (epoch !== this._epoch) return;   // left listen mode while those decoded
+
+      // Solo latch first: a duck that just switched on or off moves voices that otherwise only set
+      // their gain once (one-shots, dialogue) or hold a constant level (loops with no falloff).
+      // Anything it already ramped is left alone below so its duck fade isn't cut short.
+      this._duckMoved.clear();
+      this._applySolo(insideIds);
 
       for (const s of state.shapes) {
         if (!s._rt) s._rt = { inside: false, armed: true, source: null, gain: null, dstate: "unplayed" };
         const rt = s._rt;
         const nowIn = insideIds.has(s.id);
         const rising = nowIn && !rt.inside;
-        // A solo that just switched on or off has to move voices that otherwise only set their
-        // gain once (one-shots, dialogue) or that hold a constant level (loops with no falloff).
-        const duck = this._duck(s);
-        const duckChanged = rt.duck !== undefined && rt.duck !== duck;
-        // Ducking uses the ducked shape's own fades, so it sounds like leaving/re-entering it.
-        const duckDur = duck ? Math.max(0.02, s.fadeIn) : Math.max(0.02, s.fadeOut);
-        rt.duck = duck;
 
         if (s.mode === "loop") {
           if (nowIn && !rt.source) this._startLoop(s, latlng);
-          else if (nowIn && rt.source) this._updateLoopGain(s, latlng, duckChanged, duckDur);
+          else if (nowIn && rt.source && !this._duckMoved.has(s.id)) this._updateLoopGain(s, latlng);
           else if (!nowIn && rt.source) this._stopLoop(s);
         } else if (s.mode === "syncedLoop") {
           // Already running in sync (started on listen entry); only gate its volume.
-          if (rt.source) {
+          if (rt.source && !this._duckMoved.has(s.id)) {
             const target = nowIn ? this._targetGain(s, latlng) : 0;
-            const dur = duckChanged ? duckDur
-                      : (nowIn && !rt.inside) ? Math.max(0.02, s.fadeIn)
+            const dur = (nowIn && !rt.inside) ? Math.max(0.02, s.fadeIn)
                       : (!nowIn && rt.inside) ? Math.max(0.02, s.fadeOut) : 0.12;
             const ctx = audioCtx(), t = ctx.currentTime;
             rt.gain.gain.cancelScheduledValues(t);
@@ -1433,14 +1780,12 @@
         } else if (s.mode === "oneshot") {
           if (rising && rt.armed) { this._playOnce(s); rt.armed = false; }
           if (!nowIn) rt.armed = true;
-          if (duckChanged && rt.gain) this._rampTo(rt.gain, s.gain * duck, duckDur);
         } else { // dialogue: play once ever; queue behind any dialogue already playing
           if (rising && rt.dstate === "unplayed") {
             rt.dstate = "queued";
             this.dialogueQueue.push(s.id);
             this._advanceDialogue();
           }
-          if (duckChanged && rt.gain) this._rampTo(rt.gain, s.gain * duck, duckDur);
         }
         rt.inside = nowIn;
       }
@@ -1478,7 +1823,7 @@
         s._rt.source = makeCrossfadeLoop(buf, s.crossfade, g);
       } else {
         const src = ctx.createBufferSource();
-        src.buffer = buf; src.loop = true;
+        src.buffer = buf; loopWholeBuffer(src, buf);
         src.connect(g); src.start();
         s._rt.source = src;
       }
@@ -1488,14 +1833,16 @@
     async startSyncedLoops() {
       const synced = state.shapes.filter((s) => s.mode === "syncedLoop" && s.audioFile);
       if (!synced.length) return;
+      const epoch = this._epoch;
       await Promise.all(synced.map((s) => bufferFor(s.audioFile).catch(() => null)));
+      if (epoch !== this._epoch) return;   // left listen mode while those decoded
       const ctx = audioCtx();
       const startAt = ctx.currentTime + 0.12;   // one shared start time → all begin on the same sample
       for (const s of synced) {
         if (!s._rt) s._rt = { inside: false, armed: true, source: null, gain: null, dstate: "unplayed" };
         if (s._rt.source) continue;
         const buf = decoded.get(s.audioFile); if (!buf) continue;
-        const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+        const src = ctx.createBufferSource(); src.buffer = buf; loopWholeBuffer(src, buf);
         const g = ctx.createGain(); g.gain.setValueAtTime(0, ctx.currentTime);
         src.connect(g).connect(ctx.destination);
         src.start(startAt);
@@ -1505,12 +1852,11 @@
     },
 
     // Continuously track proximity gain as the listener moves inside a circle.
-    _updateLoopGain(s, latlng, duckChanged, duckDur) {
+    _updateLoopGain(s, latlng) {
       const rt = s._rt; if (!rt.gain) return;
       const tracksProximity = s.type === "circle" && s.falloff && s.falloff !== "none";
-      // Constant-gain loops normally have nothing to do here — unless a solo just ducked them.
-      if (!tracksProximity && !duckChanged) return;
-      this._rampTo(rt.gain, this._targetGain(s, latlng), duckChanged ? duckDur : 0.12);
+      if (!tracksProximity) return;   // constant-gain loop, nothing here moves it
+      this._rampTo(rt.gain, this._targetGain(s, latlng), 0.12);
     },
 
     _stopLoop(s) {
@@ -1563,6 +1909,9 @@
       };
       src.start();
       s._rt.source = src; s._rt.gain = g;
+      // A soloed dialogue engages the duck only now, as its clip starts — entering its area merely
+      // queued it, and the location pass that queued it is long over.
+      this._applySolo();
       reflectSounding();
     },
 
@@ -1571,6 +1920,9 @@
       if (s._rt) { s._rt.source = null; s._rt.gain = null; s._rt.dstate = "finished"; }
       reflectSounding();
       this._advanceDialogue();
+      // A soloed dialogue's duck ends with its clip. Recompute after the queue has moved on, so
+      // handing over to another soloed dialogue doesn't blip the duck off and straight back on.
+      this._applySolo();
     },
 
     resetDialogue() {
@@ -1591,8 +1943,9 @@
     },
     async playIntro() {
       if (!state.introAudio) return;
+      const epoch = this._epoch;
       const buf = await bufferFor(state.introAudio).catch(() => null);
-      if (!buf) return;
+      if (!buf || epoch !== this._epoch) return;
       if (this._introVoice) { try { this._introVoice.src.stop(); } catch (_) {} }
       this._introVoice = this._playClipOnce(buf, state.introGain, () => { this._introVoice = null; });
     },
@@ -1637,11 +1990,13 @@
     },
 
     stopAll() {
+      this._epoch++;                  // invalidate any decode still in flight
       this.outroActive = false;
       if (this._introVoice) { try { this._introVoice.src.stop(); } catch (_) {} this._introVoice = null; }
       if (this._exitVoice) { try { this._exitVoice.src.stop(); } catch (_) {} this._exitVoice = null; }
       this.resetDialogue();
       this._soloOn = false;
+      this._duckMoved.clear();
       for (const s of state.shapes) {
         this.stopShape(s);
         if (s._rt) { s._rt.inside = false; s._rt.armed = true; s._rt.dstate = "unplayed"; s._rt.duck = undefined; }
@@ -1713,6 +2068,8 @@
       if (show && !on) s.layer.addTo(map);
       else if (!show && on) map.removeLayer(s.layer);
     }
+    // Markings are drawn for listeners too; only their interactivity follows the mode.
+    for (const l of state.labels) buildLabelLayer(l);
   }
 
   function reflectSounding() {
@@ -1793,6 +2150,11 @@
       applyShapeVisibility();      // hidden areas disappear, as they will for the listener
       reflectSounding();
     }
+    // Listen mode is a preview of what a listener sees, so the authoring pane goes away entirely
+    // and the map takes the full width. Leaflet caches its container size, so it has to be told the
+    // container changed or the map keeps drawing at the old width with a dead band down the side.
+    document.body.classList.toggle("listening", mode === "listen");
+    map.invalidateSize(false);
     updateListenActions();
   }
 
@@ -1822,6 +2184,7 @@
       displayStyle: state.displayStyle,
       shapes: state.shapes.map(serializeShape),
       routes: state.routes.map(serializeRoute),
+      labels: state.labels.map(serializeLabel),
     };
   }
 
@@ -1839,6 +2202,14 @@
       if (rec) audioDir.file(name, rec.blob);
     }
     if (state.albumArt) zip.file(state.albumArt.name, state.albumArt.blob);
+    const usedImages = new Set(state.labels.map((l) => l.image).filter(Boolean));
+    if (usedImages.size) {
+      const imageDir = zip.folder("images");
+      for (const name of usedImages) {
+        const rec = imageStore.get(name);
+        if (rec) imageDir.file(name, rec.blob);
+      }
+    }
     const blob = await zip.generateAsync(
       { type: "blob", compression: "DEFLATE" },
       (m) => onProgress && onProgress(Math.round(m.percent)));
@@ -1903,6 +2274,8 @@
       clearEditHandles();     // grips outlive their shape's layer otherwise
       state.routes.forEach(destroyRouteLayer);
       state.routes = []; state.selectedRouteId = null;
+      state.labels.forEach(destroyLabelLayer);
+      state.labels = []; state.selectedLabelId = null;
       // Carry the published id across the import, so re-opening an exported bundle still updates
       // the walk it came from rather than publishing a duplicate. Bundles written before this
       // field existed simply have none, which is the old behaviour.
@@ -1912,6 +2285,8 @@
       audioStore.clear(); decoded.clear();
       artStore.forEach((r) => URL.revokeObjectURL(r.url));
       artStore.clear();
+      imageStore.forEach((r) => URL.revokeObjectURL(r.url));
+      imageStore.clear();
       state.albumArt = null;
       updateAlbumArtUI();
 
@@ -1930,6 +2305,13 @@
       if (bundle.albumArt && zip.file(bundle.albumArt)) {
         const blob = await zip.file(bundle.albumArt).async("blob");
         setAlbumArt(new File([blob], bundle.albumArt, { type: blob.type }));
+      }
+      // label artwork — loaded before hydrateLabels so a label can see whether its image arrived
+      const imageEntries = [];
+      zip.forEach((path, entry) => { if (path.startsWith("images/") && !entry.dir) imageEntries.push(entry); });
+      for (const entry of imageEntries) {
+        const blob = await entry.async("blob");
+        imageStore.set(entry.name.replace(/^images\//, ""), { blob, url: URL.createObjectURL(blob) });
       }
 
       // meta
@@ -1966,8 +2348,9 @@
         state.shapes.push(s);
       }
       hydrateRoutes(bundle.routes);
+      hydrateLabels(bundle.labels);
       renderSide();
-      renderRoutes();
+      renderMarkings();
       setMode("edit");
       resetHistory();   // imported document is the new history baseline
       toast(`Imported “${state.name}” — ${state.shapes.length} area(s).`, "ok");
@@ -2070,8 +2453,10 @@
       displayStyle: state.displayStyle,
       selected: [...state.selectedIds],
       selectedRoute: state.selectedRouteId,
+      selectedLabel: state.selectedLabelId,
       shapes: state.shapes.map(serializeShape),
       routes: state.routes.map(serializeRoute),
+      labels: state.labels.map(serializeLabel),
     });
   }
   function restoreSnapshot(json) {
@@ -2106,10 +2491,12 @@
       : null;
     updateAlbumArtUI();
     hydrateRoutes(snap.routes);
+    hydrateLabels(snap.labels);
     state.selectedIds = new Set(snap.selected || []);
     state.selectedRouteId = routeById(snap.selectedRoute) ? snap.selectedRoute : null;
+    state.selectedLabelId = labelById(snap.selectedLabel) ? snap.selectedLabel : null;
     renderSide();
-    renderRoutes();
+    renderMarkings();
     applySelection();   // restore outline weights + editing handles for the selected shape
   }
   // Record a new history entry — call AFTER a change has been applied to state.
@@ -2206,7 +2593,7 @@
   // ---- side-panel tabs + details form ----------------------------------
   function switchTab(which) {
     for (const [name, btn, panel] of [["areas", "tabBtnAreas", "tabAreas"],
-                                      ["routes", "tabBtnRoutes", "tabRoutes"],
+                                      ["markings", "tabBtnMarkings", "tabMarkings"],
                                       ["details", "tabBtnDetails", "tabDetails"]]) {
       $(btn).classList.toggle("active", which === name);
       $(panel).hidden = which !== name;
@@ -2247,6 +2634,7 @@
   $("toolPolygon").onclick = () => setTool("polygon");
   $("toolCircle").onclick = () => setTool("circle");
   $("toolRoute").onclick = () => setTool("route");
+  $("toolLabel").onclick = () => setTool("label");
   $("toolPan").onclick = () => setTool("pan");
   $("selDelete").onclick = bulkDelete;
   $("selClear").onclick = clearSelection;
@@ -2341,7 +2729,7 @@
     });
   };
   $("tabBtnAreas").onclick = () => switchTab("areas");
-  $("tabBtnRoutes").onclick = () => switchTab("routes");
+  $("tabBtnMarkings").onclick = () => switchTab("markings");
   $("tabBtnDetails").onclick = () => switchTab("details");
   $("albumArtInput").onchange = (e) => { if (e.target.files[0]) { setAlbumArt(e.target.files[0]); commit(); } };
   $("albumArtThumb").onclick = (e) => e.stopPropagation();
@@ -2359,11 +2747,15 @@
     clearEditHandles();       // grips outlive their shape's layer otherwise
     state.routes.forEach(destroyRouteLayer);
     state.routes = []; state.selectedRouteId = null;
+    state.labels.forEach(destroyLabelLayer);
+    state.labels = []; state.selectedLabelId = null;
     state.shapes = []; state.selectedIds.clear(); state.walkId = null;
     audioStore.forEach((r) => URL.revokeObjectURL(r.url));
     audioStore.clear(); decoded.clear();
     artStore.forEach((r) => URL.revokeObjectURL(r.url));
     artStore.clear();
+    imageStore.forEach((r) => URL.revokeObjectURL(r.url));
+    imageStore.clear();
     state.albumArt = null;
 
     state.name = "";
@@ -2379,7 +2771,7 @@
     updateAlbumArtUI();
     syncDetailsInputs();
     renderSide();
-    renderRoutes();
+    renderMarkings();
     resetHistory();          // the blank document becomes the new undo baseline
     toast("Started a new soundwalk.", "ok");
   }
@@ -2884,6 +3276,6 @@
 
   setMode("edit");
   renderSide();
-  renderRoutes();
+  renderMarkings();
   resetHistory();   // establish the initial (empty) history baseline
 })();

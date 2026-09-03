@@ -151,6 +151,10 @@ main { flex: 1; display: flex; min-height: 0; }
   background: var(--panel); border-left: 1px solid var(--line);
   display: flex; flex-direction: column; min-height: 0;
 }
+/* Listen mode is a preview of what a listener sees, so the authoring pane goes away entirely and
+   the map takes the whole width. The top bars stay: mode switch, menu and the listen toolbar are
+   how you drive the preview. Leaflet has to be told the container resized — see setMode. */
+body.listening #sidePane { display: none; }
 .count { background: var(--panel-2); border: 1px solid var(--line); border-radius: 20px; padding: 1px 9px; font-size: 12px; color: var(--muted); }
 
 /* Side-panel tabs */
@@ -425,17 +429,41 @@ input[type="color"]:disabled { opacity: .4; cursor: default; }
 #anchorHeadingRow input[type="range"] { flex: 1; }
 
 /* ---- suggested routes ------------------------------------------------- */
-/* Endpoint markers. iconSize is null so the div sizes itself around the label;
-   iconAnchor centres the dot, and the label flows to its right without moving it. */
-.route-end { display: flex; align-items: center; gap: 6px; height: 20px; white-space: nowrap; pointer-events: none; }
+/* Endpoint markers: just the dot. iconSize is null so the div sizes itself; iconAnchor keeps the
+   dot on the point. Captions at an endpoint are Labels now. */
+.route-end { display: flex; align-items: center; height: 20px; pointer-events: none; }
 .route-end i { display: block; border-radius: 50%; flex: 0 0 auto; }
-.route-end b {
-  font-size: 12px; font-weight: 700; line-height: 1;
-  padding: 3px 7px; border-radius: 6px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-}
 .route-label-input { width: 108px; }
 
 /* Pan tool: the map is the only thing you can grab, so show the hand closing on drag. */
 #map.pan-mode:active { cursor: grabbing; }
+
+/* ---- map labels (free-standing markings) --------------------------------
+   The divIcon wrapper is collapsed to a point and its single child is centred on it, so a label
+   sits on its coordinate whatever size the text or image turns out to be — Leaflet can't compute
+   an anchor for content it doesn't measure. Fixed screen size at every zoom, by design. */
+.map-label { width: 0 !important; height: 0 !important; background: none; border: 0; }
+.map-label > * {
+  position: absolute; left: 0; top: 0; transform: translate(-50%, -50%);
+  display: block; max-width: none; pointer-events: none;
+}
+/* The wrapper is collapsed to a point, so the content is the only thing with any area: it has to
+   take the pointer while authoring or a label could never be selected or dragged. Leaflet adds
+   .leaflet-interactive only when the marker was built interactive, which is edit mode only. */
+.map-label.leaflet-interactive > * { pointer-events: auto; cursor: move; }
+.map-label span {
+  padding: 2px 7px; border-radius: 6px; white-space: nowrap; font-weight: 600; line-height: 1.25;
+}
+.map-label img { image-rendering: auto; }
+.map-label.selected > * { outline: 2px solid var(--accent, #2f6bff); outline-offset: 2px; }
+
+.marking-head {
+  margin: 14px 4px 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); font-weight: 700;
+}
+.marking-note { margin-top: 14px; }
+.label-thumb {
+  width: 34px; height: 34px; object-fit: contain; border-radius: 4px;
+  background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0 / 10px 10px;   /* show alpha */
+  border: 1px solid var(--line);
+}

@@ -154,6 +154,8 @@ struct ContentView: View {
         if let exp = app.selectedExperience {
             MapOverlayView(shapes: exp.map.shapes,
                            routes: exp.map.drawableRoutes,
+                           labels: exp.map.drawableLabels,
+                           imagesDirectory: exp.directory.appendingPathComponent("images"),
                            offset: app.offset,
                            soundingIDs: app.engine.soundingShapeIDs,
                            dialogueStates: app.engine.dialogueStates,
@@ -170,6 +172,8 @@ struct ContentView: View {
             let here = app.location.lastKnownLocation
             MapOverlayView(shapes: [],
                            routes: [],
+                           labels: [],
+                           imagesDirectory: nil,
                            offset: .none,
                            soundingIDs: [],
                            dialogueStates: [:],

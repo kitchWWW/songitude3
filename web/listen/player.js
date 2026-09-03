@@ -36,12 +36,13 @@
 
   // ---- state ----
   let ctx = null, masterGain = null;
-  let walk = null, shapes = [], routes = [];
+  let walk = null, shapes = [], routes = [], labels = [];
   const buffers = new Map(), loadingFiles = new Set();
   let running = false, syncedStarted = false, userCoord = null;
   let manifestWalks = [];
   let shapeLayers = new Map();
   let routeLayers = [];      // suggested-route polylines + their endpoint markers
+  let labelLayers = [];      // free-standing map markings (captions / artwork)
   let dialogueQueue = [], dialoguePlaying = null;   // one dialogue plays at a time; others wait in line
   let outroActive = false, doneTimer = null, introVoice = null, exitVoice = null;   // intro/exit (walk-level) clips
   // When the synced loops launched (context time) and the seconds of skipping applied since. A
@@ -117,12 +118,47 @@
 
   // ---- audio engine ----
   function syncedFiles() { return [...new Set(shapes.filter((s) => s.mode === "syncedLoop" && s.audioFile).map((s) => s.audioFile))]; }
-  // The listener is standing inside at least one soloed area. While that holds, only soloed areas
-  // are audible; everything else they're inside ducks to silence and returns when they step out.
+  // At least one soloed area is engaged (see soloEngaged). While that holds, only soloed areas are
+  // audible; everything else the listener is inside ducks to silence and returns when it lets go.
   let soloOn = false;
+  // Shape ids whose duck factor moved during the current location pass, so the pass doesn't ramp
+  // them a second time and cut a duck fade short.
+  let duckMoved = new Set();
   // A duck is a gain change, never a stop — the ducked voice keeps running underneath so it comes
   // back where it would have been. Applies to every mode alike, dialogue included.
   function duckFor(s) { return (soloOn && !s.solo) ? 0 : 1; }
+  // Is this shape's solo engaging the duck right now? Containment is the test for every mode but
+  // dialogue: a dialogue only *queues* on entry and plays once ever, so a soloed dialogue must duck
+  // the walk while its own clip sounds — not while it waits its turn, and not once it's finished.
+  // `insideIds` is the fresh containment set during a location pass; without it we use the last one
+  // seen, which is what a dialogue starting between location updates needs.
+  function soloEngaged(s, insideIds) {
+    if (!s.solo) return false;
+    if (s.mode === "dialogue") return !!(s._rt && s._rt.dstate === "playing");
+    return insideIds ? insideIds.has(s.id) : !!(s._rt && s._rt.inside);
+  }
+  // Recompute the solo latch and move every voice whose duck factor changed. Called from the
+  // location pass and from the dialogue queue (start/finish), since a soloed dialogue engages and
+  // releases the duck between location updates. Ducking in and out uses the ducked shape's own
+  // fades, so it sounds like leaving and re-entering it.
+  function applySolo(insideIds) {
+    soloOn = shapes.some((s) => soloEngaged(s, insideIds));
+    for (const s of shapes) {
+      if (!s._rt) s._rt = { inside: false, armed: true, source: null, gain: null, dstate: "unplayed" };
+      const rt = s._rt, duck = duckFor(s);
+      // Only act once a baseline is recorded — the first pass just notes where this shape sits.
+      const changed = rt.duck !== undefined && rt.duck !== duck;
+      rt.duck = duck;
+      if (!changed) continue;
+      duckMoved.add(s.id);
+      if (!rt.gain) continue;
+      const inNow = insideIds ? insideIds.has(s.id) : rt.inside;
+      const target = (s.mode === "loop" || s.mode === "syncedLoop")
+        ? (inNow && userCoord ? targetGain(s, userCoord) : 0)
+        : s.gain * duck;
+      rampGain(rt.gain, target, duck ? Math.max(0.02, s.fadeIn) : Math.max(0.02, s.fadeOut));
+    }
+  }
   function targetGain(s, c) {
     if (s.type === "circle" && s.falloff && s.falloff !== "none" && s.center && s.radius)
       return s.gain * falloffLevel(s.falloff, haversine(s.center, c) / s.radius) * duckFor(s);
@@ -176,6 +212,14 @@
       },
     };
   }
+  // Chrome mis-loops an AudioBuffer whose frame count is odd: instead of wrapping it pins the read
+  // head at the end and repeats the last handful of samples forever — a stuck, high-pitched buzz
+  // from the second pass onward. Naming the loop window explicitly sidesteps it. The frame this
+  // gives up is a single sample (~0.02 ms) and inaudible; even-length buffers loop as before.
+  function loopWholeBuffer(src, buf) {
+    src.loop = true;
+    if (buf.length % 2) { src.loopStart = 0; src.loopEnd = (buf.length - 1) / buf.sampleRate; }
+  }
   function startLoop(s, c) {
     const buf = buffers.get(s.audioFile); if (!buf) return;
     const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, ctx.currentTime);
@@ -186,16 +230,16 @@
     if (s.loopMode === "crossfade") {
       s._rt.source = makeCrossfadeLoop(buf, s.crossfade, g, 0);
     } else {
-      const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+      const src = ctx.createBufferSource(); src.buffer = buf; loopWholeBuffer(src, buf);
       src.connect(g); src.start();
       s._rt.source = src;
     }
   }
-  function updateLoopGain(s, c, duckChanged, duckDur) {
+  function updateLoopGain(s, c) {
     if (!s._rt.gain) return;
     const tracksProximity = s.type === "circle" && s.falloff && s.falloff !== "none";
-    if (!tracksProximity && !duckChanged) return;   // constant-gain loop, nothing moved it
-    rampGain(s._rt.gain, targetGain(s, c), duckChanged ? duckDur : 0.12);
+    if (!tracksProximity) return;   // constant-gain loop, nothing here moves it
+    rampGain(s._rt.gain, targetGain(s, c), 0.12);
   }
   function stopLoop(s) {
     const rt = s._rt; if (!rt.source) return;
@@ -236,6 +280,9 @@
     src.onended = dialogueEnded(s, src);
     src.start(); s._rt.source = src; s._rt.gain = g;
     s._rt.startedAt = ctx.currentTime; s._rt.offset = 0;
+    // A soloed dialogue engages the duck only now, as its clip starts — entering its area merely
+    // queued it, and the location pass that queued it is long over.
+    applySolo();
     reflectSounding();
   }
   function dialogueEnded(s, src) {
@@ -246,6 +293,9 @@
     if (s._rt) { s._rt.source = null; s._rt.gain = null; s._rt.dstate = "finished"; }
     reflectSounding();
     advanceDialogue();
+    // A soloed dialogue's duck ends with its clip. Recompute after the queue has moved on, so
+    // handing over to another soloed dialogue doesn't blip the duck off and straight back on.
+    applySolo();
   }
 
   // ---- intro / exit (walk-level) clips ----
@@ -387,7 +437,7 @@
       if (s.mode !== "syncedLoop" || !s.audioFile || (s._rt && s._rt.source)) continue;
       const buf = buffers.get(s.audioFile); if (!buf) continue;
       if (!s._rt) s._rt = { inside: false, armed: true, source: null, gain: null, dstate: "unplayed" };
-      const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+      const src = ctx.createBufferSource(); src.buffer = buf; loopWholeBuffer(src, buf);
       const g = ctx.createGain(); g.gain.setValueAtTime(0, ctx.currentTime);
       src.connect(g).connect(masterGain); src.start(startAt);
       s._rt.source = src; s._rt.gain = g;
@@ -425,35 +475,29 @@
     startSyncedIfReady();
     const inside = new Set();
     for (const s of shapes) if (contains(s, c)) inside.add(s.id);
-    soloOn = shapes.some((s) => s.solo && inside.has(s.id));
+    // Solo latch first: a duck switching on or off has to move voices that set their gain once
+    // (one-shots, dialogue) or hold a constant level (loops with no falloff). Anything it already
+    // ramped is left alone below so its duck fade isn't cut short.
+    duckMoved.clear();
+    applySolo(inside);
     for (const s of shapes) {
       if (!s._rt) s._rt = { inside: false, armed: true, source: null, gain: null, dstate: "unplayed" };
       const rt = s._rt, nowIn = inside.has(s.id), rising = nowIn && !rt.inside;
-      // A solo switching on or off has to move voices that set their gain once (one-shots,
-      // dialogue) or hold a constant level (loops with no falloff). Ducking in and out uses the
-      // ducked shape's own fades, so it sounds like leaving and re-entering it.
-      const duck = duckFor(s);
-      const duckChanged = rt.duck !== undefined && rt.duck !== duck;
-      const duckDur = duck ? Math.max(0.02, s.fadeIn) : Math.max(0.02, s.fadeOut);
-      rt.duck = duck;
       if (s.mode === "loop") {
         if (nowIn && !rt.source) startLoop(s, c);
-        else if (nowIn && rt.source) updateLoopGain(s, c, duckChanged, duckDur);
+        else if (nowIn && rt.source && !duckMoved.has(s.id)) updateLoopGain(s, c);
         else if (!nowIn && rt.source) stopLoop(s);
       } else if (s.mode === "syncedLoop") {
-        if (rt.source) {
+        if (rt.source && !duckMoved.has(s.id)) {
           const target = nowIn ? targetGain(s, c) : 0;
-          const dur = duckChanged ? duckDur
-                    : rising ? Math.max(0.02, s.fadeIn) : (!nowIn && rt.inside ? Math.max(0.02, s.fadeOut) : 0.12);
+          const dur = rising ? Math.max(0.02, s.fadeIn) : (!nowIn && rt.inside ? Math.max(0.02, s.fadeOut) : 0.12);
           rampGain(rt.gain, target, dur);
         }
       } else if (s.mode === "oneshot") {
         if (rising && rt.armed) { playOnce(s); rt.armed = false; }
         if (!nowIn) rt.armed = true;
-        if (duckChanged && rt.gain) rampGain(rt.gain, s.gain * duck, duckDur);
       } else { // dialogue: play once ever; queue behind any dialogue already playing
         if (rising && rt.dstate === "unplayed") { rt.dstate = "queued"; dialogueQueue.push(s.id); advanceDialogue(); }
-        if (duckChanged && rt.gain) rampGain(rt.gain, s.gain * duck, duckDur);
       }
       rt.inside = nowIn;
     }
@@ -507,22 +551,59 @@
       line.addTo(lmap); line.bringToBack();
       routeLayers.push(line);
       const w = r.width ?? 6;
-      routeLayers.push(routeEndMarker(r.points[0], color, r.startLabel, w));
-      routeLayers.push(routeEndMarker(r.points[r.points.length - 1], color, r.endLabel, w));
+      routeLayers.push(routeEndMarker(r.points[0], color, w));
+      routeLayers.push(routeEndMarker(r.points[r.points.length - 1], color, w));
     }
   }
   /// A solid dot in the route's own colour, sized off the line width so it reads as the end of the
-  /// stroke rather than a badge on top of it. The icon height is fixed in CSS so iconAnchor can keep
-  /// the dot — not the label beside it — sitting on the point.
-  function routeEndMarker(pt, color, label, width) {
+  /// stroke rather than a badge on top of it. A caption at an endpoint is a Label now.
+  function routeEndMarker(pt, color, width) {
     const d = Math.max(6, Math.min(width, 14));
-    const text = label ? `<b style="color:${color}">${escapeHtml(label)}</b>` : "";
     const icon = L.divIcon({
       className: "route-end",
-      html: `<i style="background:${color};width:${d}px;height:${d}px"></i>` + text,
+      html: `<i style="background:${color};width:${d}px;height:${d}px"></i>`,
       iconSize: null, iconAnchor: [d / 2, 10],
     });
     return L.marker(pt, { icon, interactive: false, keyboard: false, zIndexOffset: 500 }).addTo(lmap);
+  }
+  // ---- labels: free-standing map markings ----
+  // Purely decorative, exactly like a route. Drawn as a divIcon so a marking keeps one size on
+  // screen at every zoom, and never interactive — a caption must not swallow a tap on the map.
+  function drawLabels() {
+    labelLayers.forEach((l) => lmap.removeLayer(l)); labelLayers = [];
+    for (const l of labels) {
+      if (!Array.isArray(l.point) || l.point.length !== 2) continue;
+      const node = labelNode(l);
+      if (!node) continue;                 // no image and no text — nothing to draw
+      const icon = L.divIcon({ className: "map-label", html: node, iconSize: null });
+      labelLayers.push(L.marker(l.point, { icon, interactive: false, keyboard: false,
+                                           zIndexOffset: 1000 }).addTo(lmap));
+    }
+  }
+  /// An image is drawn instead of the text when the bundle carries one; a named image that isn't
+  /// in the bundle falls back to the text, as FORMAT.md specifies. Built as DOM rather than markup:
+  /// the fallback needs an error handler, and an inline one would have to carry the author's text
+  /// through an HTML attribute, which breaks the moment the caption contains a quote.
+  function labelNode(l) {
+    const size = l.size ?? (l.image ? 48 : 14);
+    // `size` is a width for an image label, so it means nothing as a font size — text that stands
+    // in for a missing image is drawn at the ordinary default instead.
+    const textEl = () => {
+      if (!l.text) return null;
+      const span = document.createElement("span");
+      span.textContent = l.text;
+      span.style.fontSize = (l.image ? 14 : size) + "px";
+      span.style.color = l.textColor || "#000000";
+      if (l.bgColor !== "none") span.style.background = l.bgColor || "#ffffff";
+      return span;
+    };
+    if (!l.image) return textEl();
+    const img = document.createElement("img");
+    img.src = `${walk.base}/images/${l.image.split("/").map(encodeURIComponent).join("/")}`;
+    img.style.width = size + "px";
+    img.alt = "";
+    img.onerror = () => { const t = textEl(); if (t) img.replaceWith(t); else img.remove(); };
+    return img;
   }
   function escapeHtml(v) {
     return String(v).replace(/[&<>"']/g, (c) =>
@@ -693,7 +774,7 @@
     if (!walk) { openPicker(); return; }
     if (!ctx) { ctx = new (window.AudioContext || window.webkitAudioContext)(); masterGain = ctx.createGain(); masterGain.connect(ctx.destination); }
     if (ctx.state === "suspended") await ctx.resume();
-    running = true; syncedStarted = false; userCoord = null; soloOn = false;
+    running = true; syncedStarted = false; userCoord = null; soloOn = false; duckMoved.clear();
     syncedEpoch = 0; syncedShift = 0;
     dialogueQueue = []; dialoguePlaying = null;
     for (const s of shapes) s._rt = { inside: false, armed: true, source: null, gain: null, dstate: "unplayed" };
@@ -715,7 +796,7 @@
                       : "Listening — keep this page open and your screen on. 🎧");
   }
   function stop() {
-    running = false; syncedStarted = false; soloOn = false;
+    running = false; syncedStarted = false; soloOn = false; duckMoved.clear();
     syncedEpoch = 0; syncedShift = 0;
     stopWatch(); virtual = null;
     stopExploreMove();                     // the walker stops where it stands; explore mode itself stays on
@@ -832,10 +913,12 @@
       if (explore) exitExplore();          // and starts from the listener's real location again
       shapes = (mapData.shapes || []).map((s) => ({ ...s, _rt: null }));
       routes = mapData.routes || [];
+      labels = mapData.labels || [];
       buffers.clear(); loadingFiles.clear(); syncedStarted = false;
       dialogueQueue = []; dialoguePlaying = null;
       drawShapes();
       drawRoutes();
+      drawLabels();
       fitToWalk(mapData);
       $("titleBtn").textContent = (mapData.name || "Soundwalk") + " ▾";
       setMediaMeta();
@@ -993,6 +1076,9 @@
     // Routes travel with the walk — a suggested path left behind in the authoring city is worse
     // than none at all.
     out.routes = (mapData.routes || []).map((r) => ({ ...r, points: (r.points || []).map(move) }));
+    // Labels travel with the walk for the same reason routes do.
+    out.labels = (mapData.labels || [])
+      .map((l) => (Array.isArray(l.point) ? { ...l, point: move(l.point) } : l));
     return out;
   }
 
@@ -1043,6 +1129,7 @@
       for (const p of sh.points || []) if (p.length === 2) pts.push(p);
     }
     for (const r of mapData.routes || []) for (const p of r.points || []) if (p.length === 2) pts.push(p);
+    for (const l of mapData.labels || []) if (Array.isArray(l.point) && l.point.length === 2) pts.push(l.point);
     if (pts.length) lmap.fitBounds(L.latLngBounds(pts).pad(0.18), { maxZoom: 18 });
     else if (Array.isArray(mapData.center)) lmap.setView(mapData.center, mapData.zoom || 16);
   }

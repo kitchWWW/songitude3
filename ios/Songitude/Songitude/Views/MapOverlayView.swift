@@ -7,6 +7,10 @@ import CoreImage
 struct MapOverlayView: UIViewRepresentable {
     let shapes: [SoundShape]
     let routes: [SuggestedRoute]
+    /// Free-standing markings drawn over the map. Purely visual, like routes.
+    let labels: [MapLabel]
+    /// Where a label's artwork lives (the unpacked bundle's images/ folder). nil ⇒ text only.
+    let imagesDirectory: URL?
     let offset: CoordinateOffset
     let soundingIDs: Set<String>
     let dialogueStates: [String: DialogueState]
@@ -121,6 +125,8 @@ struct MapOverlayView: UIViewRepresentable {
         for route in routes {
             for p in route.points where p.count == 2 { include(p[0], p[1]) }
         }
+        // Labels are drawn too, so they are framed for the same reason routes are.
+        for label in labels where label.point.count == 2 { include(label.point[0], label.point[1]) }
         guard minLat <= maxLat, minLng <= maxLng else { return fallback }
 
         let center = offset.apply(CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2,
@@ -141,7 +147,7 @@ struct MapOverlayView: UIViewRepresentable {
         c.renderers.removeAll()
         // Routes go on first so the sound areas draw over them: the path is a hint underneath the
         // walk, not a thing competing with it. The user-location annotation is left alone.
-        map.removeAnnotations(map.annotations.filter { $0 is RouteEndAnnotation })
+        map.removeAnnotations(map.annotations.filter { $0 is RouteEndAnnotation || $0 is MapLabelAnnotation })
         for route in routes {
             let coords = route.coords.map { offset.apply($0) }
             guard coords.count >= 2 else { continue }
@@ -150,9 +156,8 @@ struct MapOverlayView: UIViewRepresentable {
             map.addOverlay(line)
             let tint = UIColor(hexString: route.color)
             let w = CGFloat(route.width)
-            map.addAnnotation(RouteEndAnnotation(coordinate: coords[0], label: route.startLabel,
-                                                 tint: tint, isStart: true, width: w))
-            map.addAnnotation(RouteEndAnnotation(coordinate: coords[coords.count - 1], label: route.endLabel,
+            map.addAnnotation(RouteEndAnnotation(coordinate: coords[0], tint: tint, isStart: true, width: w))
+            map.addAnnotation(RouteEndAnnotation(coordinate: coords[coords.count - 1],
                                                  tint: tint, isStart: false, width: w))
         }
         // Hidden areas sound but are never drawn. They still count toward openingRegion, so a walk
@@ -171,6 +176,24 @@ struct MapOverlayView: UIViewRepresentable {
             c.overlayToShape[ObjectIdentifier(overlay)] = shape
             map.addOverlay(overlay)
         }
+        // Markings go on last: a caption has to sit above the fills, never under one.
+        for label in labels {
+            guard let coord = label.coord else { continue }
+            let art = label.image.flatMap { artwork($0, c) }
+            // An image the bundle doesn't carry falls back to the text; with neither, nothing is
+            // drawn rather than an empty plate (FORMAT.md).
+            guard art != nil || !label.text.isEmpty else { continue }
+            map.addAnnotation(MapLabelAnnotation(coordinate: offset.apply(coord), label: label, artwork: art))
+        }
+    }
+
+    /// Decoded label artwork, cached on the coordinator so panning doesn't re-read the file.
+    private func artwork(_ file: String, _ c: Coordinator) -> UIImage? {
+        if let hit = c.artworkCache[file] { return hit }
+        guard let dir = imagesDirectory,
+              let img = UIImage(contentsOfFile: dir.appendingPathComponent(file).path) else { return nil }
+        c.artworkCache[file] = img
+        return img
     }
 
     final class Coordinator: NSObject, MKMapViewDelegate {
@@ -183,6 +206,7 @@ struct MapOverlayView: UIViewRepresentable {
         var dialogueColors = DialogueColors()
         var overlayToShape: [ObjectIdentifier: SoundShape] = [:]
         var overlayToRoute: [ObjectIdentifier: SuggestedRoute] = [:]
+        var artworkCache: [String: UIImage] = [:]
         var renderers: [ObjectIdentifier: MKOverlayPathRenderer] = [:]
 
         /// Stroke color, fill alpha, and line width for a shape given its current state. Dialogue
@@ -232,6 +256,17 @@ struct MapOverlayView: UIViewRepresentable {
         }
 
         func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+            if let marking = annotation as? MapLabelAnnotation {
+                let id = "mapLabel"
+                let view = mapView.dequeueReusableAnnotationView(withIdentifier: id)
+                    ?? MKAnnotationView(annotation: marking, reuseIdentifier: id)
+                view.annotation = marking
+                view.canShowCallout = false
+                view.isEnabled = false          // a marking must never take a tap
+                view.image = marking.markerImage()
+                view.centerOffset = .zero       // a label is centred on its point, unlike a route end
+                return view
+            }
             guard let end = annotation as? RouteEndAnnotation else { return nil }   // nil ⇒ system blue dot
             let id = "routeEnd"
             let view = mapView.dequeueReusableAnnotationView(withIdentifier: id)
@@ -258,54 +293,84 @@ struct MapOverlayView: UIViewRepresentable {
     }
 }
 
-/// An endpoint of a suggested route: a dot, plus the author's label when they set one.
+/// A free-standing map marking: the author's caption on a plate, or a small image. Purely visual —
+/// no audio, no containment test, never tappable.
+final class MapLabelAnnotation: NSObject, MKAnnotation {
+    let coordinate: CLLocationCoordinate2D
+    let label: MapLabel
+    let artwork: UIImage?
+
+    init(coordinate: CLLocationCoordinate2D, label: MapLabel, artwork: UIImage?) {
+        self.coordinate = coordinate
+        self.label = label
+        self.artwork = artwork
+    }
+
+    /// Rendered as one image rather than assembled subviews, for the reason RouteEndAnnotation does
+    /// the same: an image-backed annotation view needs no layout pass, so the marking can't drift
+    /// off its point while the map moves. Artwork wins over the text when the bundle carries it,
+    /// drawn at the authored width with its aspect ratio and alpha kept.
+    func markerImage() -> UIImage? {
+        if let art = artwork {
+            let w = max(1, CGFloat(label.size))
+            let h = max(1, w * art.size.height / max(art.size.width, 1))
+            let fmt = UIGraphicsImageRendererFormat.default()
+            fmt.opaque = false                        // PNG transparency survives
+            return UIGraphicsImageRenderer(size: CGSize(width: w, height: h), format: fmt).image { _ in
+                art.draw(in: CGRect(x: 0, y: 0, width: w, height: h))
+            }
+        }
+        let text = label.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        let font = UIFont.systemFont(ofSize: max(1, CGFloat(label.textSize)), weight: .semibold)
+        let padH: CGFloat = 7, padV: CGFloat = 3
+        let m = (text as NSString).size(withAttributes: [.font: font])
+        let size = CGSize(width: ceil(m.width) + padH * 2, height: ceil(m.height) + padV * 2)
+        let fmt = UIGraphicsImageRendererFormat.default()
+        fmt.opaque = false
+        return UIGraphicsImageRenderer(size: size, format: fmt).image { ctx in
+            if label.hasPlate {
+                UIColor(hexString: label.bgColor).setFill()
+                UIBezierPath(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 6).fill()
+            } else {
+                // No plate: a soft shadow is what keeps bare text legible over a busy basemap.
+                ctx.cgContext.setShadow(offset: .zero, blur: 3, color: UIColor.black.withAlphaComponent(0.55).cgColor)
+            }
+            (text as NSString).draw(at: CGPoint(x: padH, y: padV),
+                                    withAttributes: [.font: font,
+                                                     .foregroundColor: UIColor(hexString: label.textColor)])
+        }
+    }
+}
+
+/// An endpoint of a suggested route: a dot. A caption near a route is a `MapLabel` now.
 final class RouteEndAnnotation: NSObject, MKAnnotation {
     let coordinate: CLLocationCoordinate2D
-    let label: String
     let tint: UIColor
     let isStart: Bool
     /// Matches the route's stroke, clamped so a hairline route still shows an endpoint and a thick
     /// one doesn't sprout a blob.
     let dotSize: CGFloat
 
-    init(coordinate: CLLocationCoordinate2D, label: String, tint: UIColor, isStart: Bool, width: CGFloat) {
+    init(coordinate: CLLocationCoordinate2D, tint: UIColor, isStart: Bool, width: CGFloat) {
         self.coordinate = coordinate
-        self.label = label
         self.tint = tint
         self.isStart = isStart
         self.dotSize = min(max(width, 6), 14)
     }
 
-    /// Draw the marker as one image rather than assembling subviews — an MKAnnotationView with an
-    /// image needs no layout pass, so the label can't drift off the dot while the map moves.
-    /// Both ends are a solid dot in the route's own colour, sized off the line width so the marker
-    /// reads as the end of the stroke instead of a badge sitting on top of it.
+    /// Drawn as one image rather than assembled subviews — an MKAnnotationView with an image needs
+    /// no layout pass, so the dot can't drift off its point while the map moves. A solid dot in the
+    /// route's own colour, sized off the line width so it reads as the end of the stroke instead of
+    /// a badge sitting on top of it.
     func markerImage() -> UIImage {
-        let dot = dotSize, gap: CGFloat = 6
-        let text = label.trimmingCharacters(in: .whitespacesAndNewlines)
-        let font = UIFont.systemFont(ofSize: 12, weight: .bold)
-        let padH: CGFloat = 7, padV: CGFloat = 3
-        var pillSize = CGSize.zero
-        if !text.isEmpty {
-            let m = (text as NSString).size(withAttributes: [.font: font])
-            pillSize = CGSize(width: ceil(m.width) + padH * 2, height: ceil(m.height) + padV * 2)
-        }
-        let size = CGSize(width: dot + (pillSize.width > 0 ? gap + pillSize.width : 0),
-                          height: max(dot, pillSize.height))
-        return UIGraphicsImageRenderer(size: size).image { ctx in
-            let cg = ctx.cgContext
-            let dotRect = CGRect(x: 0, y: (size.height - dot) / 2, width: dot, height: dot)
-            cg.setFillColor(tint.cgColor)
-            cg.fillEllipse(in: dotRect)
-
-            guard !text.isEmpty else { return }
-            let pill = CGRect(x: dot + gap, y: (size.height - pillSize.height) / 2,
-                              width: pillSize.width, height: pillSize.height)
-            let path = UIBezierPath(roundedRect: pill, cornerRadius: 6)
-            UIColor.white.withAlphaComponent(0.94).setFill()
-            path.fill()
-            (text as NSString).draw(at: CGPoint(x: pill.minX + padH, y: pill.minY + padV),
-                                    withAttributes: [.font: font, .foregroundColor: tint])
+        let dot = dotSize
+        let size = CGSize(width: dot, height: dot)
+        let fmt = UIGraphicsImageRendererFormat.default()
+        fmt.opaque = false
+        return UIGraphicsImageRenderer(size: size, format: fmt).image { ctx in
+            ctx.cgContext.setFillColor(tint.cgColor)
+            ctx.cgContext.fillEllipse(in: CGRect(origin: .zero, size: size))
         }
     }
 }

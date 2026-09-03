@@ -163,19 +163,18 @@ extension SoundShape {
     var isCrossfadeLoop: Bool { mode == .loop && loopMode == "crossfade" }
 }
 
-/// A drawn suggestion of where to walk: an open path with a marker at each end, optionally
-/// labelled. Purely visual — a route carries no audio, has no containment test, and has no bearing
-/// on playback of any kind. Absent in older bundles ⇒ nothing is drawn, which is exactly right.
+/// A drawn suggestion of where to walk: an open path with a marker at each end. Purely visual — a
+/// route carries no audio, has no containment test, and has no bearing on playback of any kind.
+/// Absent in older bundles ⇒ nothing is drawn, which is exactly right. A caption near a route is a
+/// `MapLabel`, placed wherever it reads best rather than welded to an endpoint.
 struct SuggestedRoute: Codable, Identifiable {
     let id: String
     let name: String
     var points: [[Double]]      // [[lat, lng], ...] in walking order
     let color: String           // "#rrggbb"
     let width: Double           // stroke width in points
-    let startLabel: String      // "" ⇒ a plain marker with no text
-    let endLabel: String
 
-    enum CodingKeys: String, CodingKey { case id, name, points, color, width, startLabel, endLabel }
+    enum CodingKeys: String, CodingKey { case id, name, points, color, width }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -184,8 +183,6 @@ struct SuggestedRoute: Codable, Identifiable {
         name = (try? c.decode(String.self, forKey: .name)) ?? "Route"
         color = (try? c.decode(String.self, forKey: .color)) ?? "#111111"
         width = (try? c.decode(Double.self, forKey: .width)) ?? 6
-        startLabel = (try? c.decode(String.self, forKey: .startLabel)) ?? ""
-        endLabel = (try? c.decode(String.self, forKey: .endLabel)) ?? ""
     }
 
     /// A route needs two points to be a line; anything less simply isn't drawn.
@@ -193,6 +190,49 @@ struct SuggestedRoute: Codable, Identifiable {
     var coords: [CLLocationCoordinate2D] {
         points.compactMap { $0.count == 2 ? CLLocationCoordinate2D(latitude: $0[0], longitude: $0[1]) : nil }
     }
+}
+
+/// A free-standing map marking: a caption on a plate, or a small image, pinned to one point.
+/// Purely visual exactly like a `SuggestedRoute` — no audio, no containment test, no bearing on
+/// playback. Absent in older bundles ⇒ nothing is drawn, which is exactly right.
+///
+/// Labels replaced the routes' old `startLabel`/`endLabel` captions, which could only ever sit on
+/// an endpoint. Those were removed outright rather than kept for compatibility.
+struct MapLabel: Codable, Identifiable {
+    let id: String
+    let name: String
+    var point: [Double]         // [lat, lng]
+    let text: String
+    let textColor: String       // "#rrggbb"
+    let bgColor: String         // "#rrggbb", or "none" for bare text with no plate
+    let image: String?          // filename under images/ ⇒ drawn instead of the text
+    let size: Double            // text ⇒ font size in points; image ⇒ width in points
+
+    enum CodingKeys: String, CodingKey { case id, name, point, text, textColor, bgColor, image, size }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        point = (try? c.decode([Double].self, forKey: .point)) ?? []
+        id = (try? c.decode(String.self, forKey: .id)) ?? UUID().uuidString
+        name = (try? c.decode(String.self, forKey: .name)) ?? "Label"
+        text = (try? c.decode(String.self, forKey: .text)) ?? ""
+        textColor = (try? c.decode(String.self, forKey: .textColor)) ?? "#000000"
+        bgColor = (try? c.decode(String.self, forKey: .bgColor)) ?? "#ffffff"
+        image = try? c.decode(String.self, forKey: .image)
+        // The default follows the kind, matching every other reader: 48pt wide for artwork, 14pt
+        // type for a caption.
+        size = (try? c.decode(Double.self, forKey: .size)) ?? ((try? c.decode(String.self, forKey: .image)) != nil ? 48 : 14)
+    }
+
+    var coord: CLLocationCoordinate2D? {
+        point.count == 2 ? CLLocationCoordinate2D(latitude: point[0], longitude: point[1]) : nil
+    }
+    /// Nothing to draw when there is neither artwork nor text.
+    var isDrawable: Bool { coord != nil && (image != nil || !text.isEmpty) }
+    var hasPlate: Bool { bgColor.lowercased() != "none" }
+    /// `size` is a width for an image label, so it means nothing as a font size — text standing in
+    /// for a missing image is drawn at the ordinary default instead.
+    var textSize: Double { image == nil ? size : 14 }
 }
 
 /// The full map definition (`map.json`).
@@ -217,8 +257,11 @@ struct SoundMap: Codable {
     var shapes: [SoundShape]
     /// Suggested routes drawn over the map. Optional — older bundles have none.
     var routes: [SuggestedRoute]?
+    /// Free-standing markings drawn over the map. Optional — older bundles have none.
+    var labels: [MapLabel]?
 
     var drawableRoutes: [SuggestedRoute] { (routes ?? []).filter { $0.isDrawable } }
+    var drawableLabels: [MapLabel] { (labels ?? []).filter { $0.isDrawable } }
 
     var centerCoord: CLLocationCoordinate2D {
         if let c = center, c.count == 2 { return CLLocationCoordinate2D(latitude: c[0], longitude: c[1]) }
@@ -236,6 +279,8 @@ struct Experience: Identifiable {
 
     var displayName: String { map.name.isEmpty ? id : map.name }
     func audioURL(for file: String) -> URL { directory.appendingPathComponent("audio").appendingPathComponent(file) }
+    /// Label artwork lives under images/, alongside audio/ in the same unpacked bundle folder.
+    func imageURL(for file: String) -> URL { directory.appendingPathComponent("images").appendingPathComponent(file) }
     var albumArtURL: URL? {
         guard let a = map.albumArt else { return nil }
         return directory.appendingPathComponent(a)

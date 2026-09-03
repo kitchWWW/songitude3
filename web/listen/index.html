@@ -10,14 +10,21 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
   <style>
-    /* Suggested-route endpoint markers. iconSize is null so the div sizes itself around the
-       label, while iconAnchor keeps the dot pinned on the point. */
-    .route-end { display: flex; align-items: center; gap: 6px; height: 20px; white-space: nowrap; pointer-events: none; }
+    /* Suggested-route endpoint markers: just the dot. iconSize is null so the div sizes itself,
+       while iconAnchor keeps the dot pinned on the point. Captions are Labels now. */
+    .route-end { display: flex; align-items: center; height: 20px; pointer-events: none; }
     .route-end i { display: block; border-radius: 50%; flex: 0 0 auto; }
-    .route-end b {
-      font-size: 12px; font-weight: 700; line-height: 1;
-      padding: 3px 7px; border-radius: 6px;
-      background: rgba(255, 255, 255, 0.92);
+
+    /* Free-standing map markings. The wrapper collapses to a point and its single child is centred
+       on it, so a label sits on its coordinate whatever size it turns out to be. Fixed screen size
+       at every zoom, which is what keeps a caption readable when the map is zoomed out. */
+    .map-label { width: 0 !important; height: 0 !important; background: none; border: 0; }
+    .map-label > * {
+      position: absolute; left: 0; top: 0; transform: translate(-50%, -50%);
+      display: block; max-width: none; pointer-events: none;
+    }
+    .map-label span {
+      padding: 2px 7px; border-radius: 6px; white-space: nowrap; font-weight: 600; line-height: 1.25;
       box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
     }
 

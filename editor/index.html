@@ -44,6 +44,7 @@
         <button id="toolPolygon">▰ Polygon</button>
         <button id="toolCircle">◯ Circle</button>
         <button id="toolRoute">⤳ Route</button>
+        <button id="toolLabel">🏷 Label</button>
         <button id="toolSelect" class="active">➤ Select</button>
         <button id="toolPan">✜ Pan</button>
         <span class="hint" id="toolHint">Select a tool to start drawing.</span>
@@ -67,7 +68,7 @@
     <aside id="sidePane">
       <div class="side-tabs">
         <button id="tabBtnAreas" class="side-tab active">Sound areas <span id="shapeCount" class="count">0</span></button>
-        <button id="tabBtnRoutes" class="side-tab">Routes <span id="routeCount" class="count">0</span></button>
+        <button id="tabBtnMarkings" class="side-tab">Markings <span id="markingCount" class="count">0</span></button>
         <button id="tabBtnDetails" class="side-tab">Details</button>
       </div>
 
@@ -84,11 +85,19 @@
         </p>
       </div>
 
-      <div id="tabRoutes" class="tab-panel" hidden>
+      <div id="tabMarkings" class="tab-panel" hidden>
+        <h4 class="marking-head">Routes</h4>
         <div id="routeList"></div>
         <p id="routeEmpty" class="empty">
           No routes yet.<br />Use <b>Route</b> on the map to suggest a path through the walk.
-          Routes are drawn for listeners but make no sound and touch nothing else.
+        </p>
+        <h4 class="marking-head">Labels</h4>
+        <div id="labelList"></div>
+        <p id="labelEmpty" class="empty">
+          No labels yet.<br />Use <b>Label</b> on the map to pin a caption or a small image.
+        </p>
+        <p class="empty marking-note">
+          Markings are drawn for listeners but make no sound and touch nothing else.
         </p>
       </div>
 

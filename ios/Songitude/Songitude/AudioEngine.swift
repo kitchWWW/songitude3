@@ -47,9 +47,12 @@ final class RenderEngine: ObservableObject {
     /// every synced clip on the same offset and the sample alignment that defines the mode survives.
     private var syncedEpochHost: UInt64?
     private var syncedShift: TimeInterval = 0
-    /// The listener is standing inside at least one soloed area. While that holds, only soloed areas
+    /// At least one soloed area is engaged (see `soloEngaged`). While that holds, only soloed areas
     /// are audible — every other area they are inside ducks to silence and comes back on the way out.
     private var soloActive = false
+    /// Shape ids whose duck factor moved during the current location pass, so the pass doesn't ramp
+    /// them a second time and cut a duck fade short.
+    private var duckMoved = Set<String>()
     private var wasInterrupted = false           // suspended by the system (call/Siri); resume when it ends
     // Residency thresholds (metres from a region's boundary). Hysteresis: decode when within
     // preload, keep until beyond evict — so pacing back and forth over a line doesn't thrash.
@@ -357,6 +360,7 @@ final class RenderEngine: ObservableObject {
         if let v = exitVoice { detach(v); exitVoice = nil }
         for id in runtimes.keys { runtimes[id] = Runtime() }
         soloActive = false
+        duckMoved.removeAll()
         soundingShapeIDs = []
         engine.stop()
         loadToken &+= 1              // invalidate any in-flight decodes
@@ -382,37 +386,30 @@ final class RenderEngine: ObservableObject {
         for shape in shapes where GeoUtils.contains(shape, coord: coord, offset: offset) {
             nowInside.insert(shape.id)
         }
-        soloActive = shapes.contains { $0.solo && nowInside.contains($0.id) }
+        // Solo latch first: a duck that just came on or went off has to move voices that otherwise
+        // set their volume once (one-shots, dialogue) or hold a constant level (loops with no
+        // falloff). Anything it already ramped is left alone below so its duck fade isn't cut short.
+        duckMoved.removeAll()
+        applySolo(inside: nowInside)
 
         for shape in shapes {
             var rt = runtimes[shape.id] ?? Runtime()
             let isIn = nowInside.contains(shape.id)
             let rising = isIn && !rt.inside
-            // A solo that just came on or went off has to move voices that otherwise set their
-            // volume once (one-shots, dialogue) or hold a constant level (loops with no falloff).
-            // Ducking uses the ducked shape's own fades, so it sounds like leaving and re-entering.
             let duck = duckFactor(shape)
-            let duckChanged = rt.duck != nil && rt.duck != duck
-            let duckDur: TimeInterval = duck > 0 ? max(0.02, shape.fadeIn) : max(0.02, shape.fadeOut)
-            rt.duck = duck
 
             switch shape.mode {
             case .loop:
                 if isIn {
                     let target = Float(shape.gain * loopLevel(shape, coord: coord)) * duck
                     if voices[shape.id] == nil { startLoop(shape, target: target) }
-                    else if duckChanged, let voice = voices[shape.id] {
-                        ramp(voice, to: target, duration: duckDur)
-                    } else { setLoopTarget(shape, target: target) }
+                    else if !duckMoved.contains(shape.id) { setLoopTarget(shape, target: target) }
                 } else if voices[shape.id] != nil {
                     stopLoop(shape)
                 }
             case .oneshot:
                 if rising && rt.armed { playOnce(shape); rt.armed = false }
                 if !isIn { rt.armed = true }
-                if duckChanged, let voice = voices[shape.id] {
-                    ramp(voice, to: Float(shape.gain) * duck, duration: duckDur)
-                }
             case .dialogue:
                 // Play once ever; if a dialogue is already sounding, queue and play when it ends.
                 if rising && (dialogueStates[shape.id] ?? .unplayed) == .unplayed {
@@ -420,20 +417,19 @@ final class RenderEngine: ObservableObject {
                     dialogueQueue.append(shape.id)
                     advanceDialogue()
                 }
-                if duckChanged, let voice = voices[shape.id] {
-                    ramp(voice, to: Float(shape.gain) * duck, duration: duckDur)
-                }
             case .syncedLoop:
                 // Never starts/stops here — it's already running in sync; we only gate its volume.
-                if let voice = voices[shape.id] {
+                if !duckMoved.contains(shape.id), let voice = voices[shape.id] {
                     let target = isIn ? Float(shape.gain * loopLevel(shape, coord: coord)) * duck : 0
-                    let dur: TimeInterval = duckChanged ? duckDur
-                        : (rising ? max(0.02, shape.fadeIn)
-                           : (rt.inside && !isIn ? max(0.02, shape.fadeOut) : 0.12))
+                    let dur: TimeInterval = rising ? max(0.02, shape.fadeIn)
+                        : (rt.inside && !isIn ? max(0.02, shape.fadeOut) : 0.12)
                     ramp(voice, to: target, duration: dur)
                 }
             }
             rt.inside = isIn
+            // A dialogue starting mid-pass re-runs applySolo, which writes this shape's duck
+            // straight into `runtimes` — keep that rather than the copy taken before the switch.
+            rt.duck = runtimes[shape.id]?.duck ?? rt.duck
             runtimes[shape.id] = rt
         }
         refreshSounding()
@@ -554,6 +550,46 @@ final class RenderEngine: ObservableObject {
     /// ducked dialogue keeps advancing silently rather than being cut or replayed.
     private func duckFactor(_ shape: SoundShape) -> Float {
         (soloActive && !shape.solo) ? 0 : 1
+    }
+
+    /// Is this shape's solo engaging the duck right now? Containment is the test for every mode but
+    /// dialogue: a dialogue only *queues* on entry and plays once ever, so a soloed dialogue must
+    /// duck the walk while its own clip sounds — not while it waits its turn, and not once it has
+    /// finished. `inside` is the fresh containment set during a location pass; without it we use the
+    /// last one seen, which is what a dialogue starting between location fixes needs.
+    private func soloEngaged(_ shape: SoundShape, inside: Set<String>?) -> Bool {
+        guard shape.solo else { return false }
+        if shape.mode == .dialogue { return (dialogueStates[shape.id] ?? .unplayed) == .playing }
+        return inside?.contains(shape.id) ?? (runtimes[shape.id]?.inside ?? false)
+    }
+
+    /// Recompute the solo latch and move every voice whose duck factor changed. Called from the
+    /// location pass and from the dialogue queue (start/finish), since a soloed dialogue engages and
+    /// releases the duck between location fixes. Ducking in and out uses the ducked shape's own
+    /// fades, so it sounds like leaving and re-entering it.
+    private func applySolo(inside: Set<String>? = nil) {
+        soloActive = shapes.contains { soloEngaged($0, inside: inside) }
+        for shape in shapes {
+            var rt = runtimes[shape.id] ?? Runtime()
+            let duck = duckFactor(shape)
+            // Only act once a baseline is recorded — the first pass just notes where this shape sits.
+            let changed = rt.duck != nil && rt.duck != duck
+            rt.duck = duck
+            runtimes[shape.id] = rt
+            guard changed else { continue }
+            duckMoved.insert(shape.id)
+            guard let voice = voices[shape.id] else { continue }
+            let isIn = inside?.contains(shape.id) ?? rt.inside
+            let target: Float
+            switch shape.mode {
+            case .loop, .syncedLoop:
+                if isIn, let c = lastCoord { target = Float(shape.gain * loopLevel(shape, coord: c)) * duck }
+                else { target = 0 }
+            case .oneshot, .dialogue:
+                target = Float(shape.gain) * duck
+            }
+            ramp(voice, to: target, duration: duck > 0 ? max(0.02, shape.fadeIn) : max(0.02, shape.fadeOut))
+        }
     }
 
     /// Proximity multiplier (0..1) for a circle loop with a falloff profile; 1 otherwise.
@@ -782,6 +818,9 @@ final class RenderEngine: ObservableObject {
         voices[shape.id] = voice
         scheduleOnce(voice, buf: buf, from: 0, shape: shape)
         voice.player.play()
+        // A soloed dialogue engages the duck only now, as its clip starts — entering its area merely
+        // queued it, and the location pass that queued it is long over.
+        applySolo()
         refreshSounding()
     }
 
@@ -790,6 +829,9 @@ final class RenderEngine: ObservableObject {
         setDialogueState(id, .finished)
         refreshSounding()
         advanceDialogue()
+        // A soloed dialogue's duck ends with its clip. Recompute after the queue has moved on, so
+        // handing over to another soloed dialogue doesn't blip the duck off and straight back on.
+        applySolo()
     }
 
     /// Fresh start (new experience): every dialogue back to unplayed, queue empty.
