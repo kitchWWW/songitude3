@@ -18,3 +18,10 @@ ios/Songitude/Experiences/magic_square.zip
 
 # Demo videos for App Review — over GitHub's 100 MB file limit; kept locally only.
 docs/demo-videos/*.mp4
+
+# Android
+android/local.properties
+android/.gradle/
+android/build/
+android/app/build/
+android/.kotlin/
