@@ -70,12 +70,8 @@ wording under Guideline 5.1.1(iv), and the reasoning holds here too.
 
 ## Parity notes
 
-Two things are deliberate and worth knowing:
+One thing is deliberate and worth knowing:
 
-- **Labels don't travel with a transportable walk.** `SoundMap.transposed` moves the centre, the
-  shapes and the routes, but not the labels — matching `GeoUtils.swift` exactly. This looks like an
-  iOS bug (a caption left behind where the walk was authored points at nothing), but parity wins
-  until the iOS side changes. Fix both together.
 - **The "fuzzy" display style is approximated.** MapKit feathers a shape with a radial gradient; the
   Maps SDK has no gradient fill, so the edge is built from concentric bands. Visually the same soft
   edge, a few more overlays.

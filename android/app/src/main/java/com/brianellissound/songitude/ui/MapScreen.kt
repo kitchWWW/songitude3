@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -160,6 +161,10 @@ fun MapScreen(
             Column(
                 Modifier
                     .align(Alignment.BottomCenter)
+                    // Above the intro card *and* its scrim: the same button drives the whole walk,
+                    // so it must not be dimmed by the overlay behind it, and pressing it has to
+                    // start the walk rather than merely dismissing the card.
+                    .zIndex(2f)
                     .navigationBarsPadding()
                     .padding(bottom = 28.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -196,15 +201,21 @@ fun MapScreen(
             }
         }
 
+        // Cards sit over the map but under the transport — zIndex, not draw order, so the two
+        // relationships stay explicit no matter how this Box is later rearranged.
         if (showIntro && exp != null) {
-            WalkIntroCard(app = app, experience = exp, onOpenArtist = onOpenArtist)
+            Box(Modifier.zIndex(1f)) {
+                WalkIntroCard(app = app, experience = exp, onOpenArtist = onOpenArtist)
+            }
         } else if (showFarAway && exp != null) {
-            FarAwayCard(
-                walkName = exp.displayName,
-                distanceMiles = app.currentWalkDistanceMiles,
-                onBrowse = { app.dismissFarAwayCard(); onOpenBrowser() },
-                onDismiss = { app.dismissFarAwayCard() },
-            )
+            Box(Modifier.zIndex(1f)) {
+                FarAwayCard(
+                    walkName = exp.displayName,
+                    distanceMiles = app.currentWalkDistanceMiles,
+                    onBrowse = { app.dismissFarAwayCard(); onOpenBrowser() },
+                    onDismiss = { app.dismissFarAwayCard() },
+                )
+            }
         }
     }
 }

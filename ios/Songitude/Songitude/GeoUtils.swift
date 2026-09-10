@@ -81,7 +81,8 @@ struct WalkTransposition {
 
 extension SoundMap {
     /// A copy of this walk moved and turned onto the listener. Radii are untouched — only positions
-    /// move — so every area keeps its authored size and relative bearing.
+    /// move — so every area keeps its authored size and relative bearing. Shapes, routes and labels
+    /// all travel: anything left behind would sit where the walk was drawn, not where it is heard.
     func transposed(_ t: WalkTransposition) -> SoundMap {
         var copy = self
         if let c = center { copy.center = t.apply(c) }
@@ -97,6 +98,15 @@ extension SoundMap {
             var r = route
             r.points = r.points.map(t.apply)
             return r
+        }
+        // Labels travel for exactly the same reason, and FORMAT.md has always said so. They were
+        // missed when labels replaced the routes' old endpoint captions, which left a caption
+        // sitting wherever the walk happened to be drawn while the walk itself moved onto the
+        // listener.
+        copy.labels = labels?.map { label in
+            var l = label
+            l.point = t.apply(l.point)
+            return l
         }
         return copy
     }

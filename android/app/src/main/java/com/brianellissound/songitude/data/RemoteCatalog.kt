@@ -8,7 +8,13 @@ import com.brianellissound.songitude.model.LatLngD
 import com.brianellissound.songitude.model.SongitudeJson
 import com.brianellissound.songitude.model.SoundMap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.serialization.Serializable
 import java.io.File
 import java.net.HttpURLConnection
@@ -68,7 +74,7 @@ object CatalogService {
 
     suspend fun fetchManifest(): Result<List<RemoteWalk>> = withContext(Dispatchers.IO) {
         try {
-            val body = httpGet(CatalogEndpoints.MANIFEST).decodeToString()
+            val body = httpGet(CatalogEndpoints.MANIFEST, noCache = true).decodeToString()
             Result.success(SongitudeJson.decodeFromString<WalkManifest>(body).walks)
         } catch (t: Throwable) {
             Result.failure(t)
@@ -77,7 +83,9 @@ object CatalogService {
 
     suspend fun fetchArtist(id: String): ArtistProfile? = withContext(Dispatchers.IO) {
         try {
-            SongitudeJson.decodeFromString<ArtistProfile>(httpGet(CatalogEndpoints.artist(id)).decodeToString())
+            SongitudeJson.decodeFromString<ArtistProfile>(
+                httpGet(CatalogEndpoints.artist(id), noCache = true).decodeToString()
+            )
         } catch (t: Throwable) {
             null
         }
@@ -91,21 +99,32 @@ object CatalogService {
         }
     }
 
-    fun httpGet(urlString: String): ByteArray {
+    /**
+     * One GET. [noCache] is for the manifest and artist profiles, which are republished in place and
+     * whose stale copies are wrong in ways that matter; a walk's own files are immutable once
+     * published, so they are happily cached.
+     *
+     * Deliberately does NOT call `disconnect()`. That tears down the socket and defeats keep-alive,
+     * and a walk can be eighty-odd clips — an extra TCP and TLS handshake each was the difference
+     * between this and the iOS downloader on the same wifi. Closing the stream returns the
+     * connection to the pool for the next file instead.
+     */
+    fun httpGet(urlString: String, noCache: Boolean = false): ByteArray {
         val conn = (URL(urlString).openConnection() as HttpURLConnection).apply {
             connectTimeout = 20_000
             readTimeout = 60_000
-            // The catalog is republished in place, so a cached copy can be stale in a way that
-            // matters — an edited title or intro colour would never reach the device.
-            setRequestProperty("Cache-Control", "no-cache")
+            setRequestProperty("Accept-Encoding", "gzip")
+            if (noCache) setRequestProperty("Cache-Control", "no-cache")
         }
-        try {
-            val code = conn.responseCode
-            if (code != 200) throw IllegalStateException("HTTP $code for $urlString")
-            return conn.inputStream.use { it.readBytes() }
-        } finally {
-            conn.disconnect()
+        val code = conn.responseCode
+        if (code != 200) {
+            conn.errorStream?.use { it.readBytes() }   // drain, so the connection can be reused
+            throw IllegalStateException("HTTP $code for $urlString")
         }
+        val raw = conn.inputStream.use { it.readBytes() }
+        return if (conn.contentEncoding.equals("gzip", ignoreCase = true)) {
+            java.util.zip.GZIPInputStream(raw.inputStream()).use { it.readBytes() }
+        } else raw
     }
 }
 
@@ -178,7 +197,7 @@ class WalkDownloader(private val context: Context) {
         try {
             val dir = cacheDir(walk.id)
             File(dir, "audio").mkdirs()
-            val mapBytes = CatalogService.httpGet(walk.mapUrl)
+            val mapBytes = CatalogService.httpGet(walk.mapUrl, noCache = true)
             File(dir, "map.json").writeBytes(mapBytes)
             val map = SongitudeJson.decodeFromString<SoundMap>(mapBytes.decodeToString())
             withContext(Dispatchers.Main) { mapReady(map) }
@@ -192,18 +211,34 @@ class WalkDownloader(private val context: Context) {
             (map.labels ?: emptyList()).mapNotNull { it.image }.filter { it.isNotEmpty() }
                 .forEach { rels.add("images/$it") }
 
+            // Fetch a few at a time. A walk can be eighty-odd clips, and downloading them one
+            // after another leaves the connection idle for a whole round-trip between each. Four is
+            // enough to keep the link busy without swamping a phone's radio or S3.
             val list = rels.toList()
-            list.forEachIndexed { i, rel ->
-                val dest = File(dir, rel)
-                if (!dest.exists()) {
-                    dest.parentFile?.mkdirs()
-                    val enc = rel.split("/").joinToString("/") {
-                        URLEncoder.encode(it, "UTF-8").replace("+", "%20")
+            val gate = Semaphore(4)
+            val finished = AtomicInteger(0)
+            coroutineScope {
+                list.map { rel ->
+                    async {
+                        gate.withPermit {
+                            val dest = File(dir, rel)
+                            if (!dest.exists()) {
+                                dest.parentFile?.mkdirs()
+                                val enc = rel.split("/").joinToString("/") {
+                                    URLEncoder.encode(it, "UTF-8").replace("+", "%20")
+                                }
+                                val bytes = CatalogService.httpGet("${walk.base}/$enc")
+                                // Write beside the target and move into place, so an interrupted
+                                // download can never leave a truncated clip that later looks cached.
+                                val tmp = File(dest.parentFile, dest.name + ".part")
+                                tmp.writeBytes(bytes)
+                                if (!tmp.renameTo(dest)) { dest.writeBytes(bytes); tmp.delete() }
+                            }
+                            val done = finished.incrementAndGet().toDouble() / maxOf(1, list.size)
+                            withContext(Dispatchers.Main) { progress(done) }
+                        }
                     }
-                    dest.writeBytes(CatalogService.httpGet("${walk.base}/$enc"))
-                }
-                val done = (i + 1).toDouble() / maxOf(1, list.size)
-                withContext(Dispatchers.Main) { progress(done) }
+                }.awaitAll()
             }
             File(dir, ".complete").writeBytes(ByteArray(0))
             versionFile(walk.id).writeText(walk.updatedAt ?: "")

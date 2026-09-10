@@ -148,6 +148,7 @@ class AppState(app: Application) : AndroidViewModel(app) {
 
     companion object {
         private const val ONBOARD_KEY = "hasOnboarded.v1"
+        private const val SPLASH_KEY = "splash.seen.v1"
         private const val APPEARANCE_KEY = "appearance.v1"
         /** How long an intro card stays "already seen" for a walk. Deliberately loose: moving around
          *  the app shouldn't re-show it, but coming back later should. */
@@ -248,9 +249,16 @@ class AppState(app: Application) : AndroidViewModel(app) {
             _introShowings.value = 0
             _showFarAwayCard.value = false
         }
-        _current.value = anchoredIfPortable(exp)
+        // Load the *placed* walk, not the authored one. For a transportable walk these differ: the
+        // map draws the areas moved onto the listener while the engine would otherwise keep testing
+        // against the coordinates they were composed at, so nothing ever sounds and nothing ever
+        // highlights. iOS gets away with the authored copy here because its re-placement always
+        // fires a moment later; on Android the fix arrives through a StateFlow, which drops a value
+        // equal to the one already held — so an identical one-shot fix would never re-place it.
+        val placed = anchoredIfPortable(exp)
+        _current.value = placed
         _offset.value = CoordinateOffset.NONE
-        engine.load(exp)                 // stops current playback
+        engine.load(placed)              // stops current playback
         engine.setOffset(CoordinateOffset.NONE)
         location.stop(); stopSlew()      // switching pauses playback → release GPS and reset slewing
         maybeShowIntroCard()
@@ -501,6 +509,11 @@ class AppState(app: Application) : AndroidViewModel(app) {
         _resetToken.value += 1
         refreshCatalog()
     }
+
+    /** Shown once per install, at the same moment the onboarding screen first appears. Read
+     *  straight from prefs so a returning launch never flashes a frame of splash. */
+    val splashSeen: Boolean get() = prefs.getBoolean(SPLASH_KEY, false)
+    fun markSplashSeen() { prefs.edit().putBoolean(SPLASH_KEY, true).apply() }
 
     fun completeOnboarding() {
         _hasOnboarded.value = true

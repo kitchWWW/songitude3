@@ -5,6 +5,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import com.brianellissound.songitude.ui.LogoTile
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -23,6 +27,12 @@ private fun OnboardingStep(
     subtitle: String,
     body: String,
     footnote: String? = null,
+    /** Screen one carries the logo; the splash flies its tile into this exact slot. */
+    showLogo: Boolean = false,
+    /** True while the splash still owns the logo. The slot reserves the space but draws nothing, so
+     *  the incoming tile lands on an empty spot rather than on top of a duplicate. */
+    hidesLogo: Boolean = false,
+    onLogoBounds: (Rect) -> Unit = {},
     onContinue: () -> Unit,
     onNotNow: () -> Unit,
 ) {
@@ -32,19 +42,24 @@ private fun OnboardingStep(
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            if (showLogo) {
+                Box(
+                    Modifier
+                        .size(100.dp)
+                        .onGloballyPositioned { onLogoBounds(it.boundsInRoot()) }
+                ) {
+                    if (!hidesLogo) LogoTile(size = 100.dp)
+                }
+                Spacer(Modifier.height(24.dp))
+            }
             Text(title, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(12.dp))
             Text(subtitle, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
             Spacer(Modifier.height(32.dp))
-            Text(body, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
-            if (footnote != null) {
+            CopyBlock(body)
+            if (!footnote.isNullOrBlank()) {
                 Spacer(Modifier.height(16.dp))
-                Text(
-                    footnote,
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                CopyBlock(footnote, bold = true)
             }
             Spacer(Modifier.height(40.dp))
             Button(onClick = onContinue, modifier = Modifier.fillMaxWidth().height(52.dp)) {
@@ -56,14 +71,79 @@ private fun OnboardingStep(
     }
 }
 
+/**
+ * Renders a block of onboarding copy. A line beginning with "- " becomes a bullet, left-aligned so
+ * the markers line up; everything else is a centred paragraph. Keeping both in one renderer means
+ * the copy can be rewritten from prose to bullets and back without touching the layout.
+ */
+@Composable
+private fun CopyBlock(text: String, bold: Boolean = false) {
+    val lines = text.trim().lines()
+    val weight = if (bold) FontWeight.SemiBold else FontWeight.Normal
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        var paragraph = StringBuilder()
+
+        @Composable
+        fun flush() {
+            if (paragraph.isNotBlank()) {
+                Text(
+                    paragraph.toString().trim(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    fontWeight = weight,
+                )
+            }
+            paragraph = StringBuilder()
+        }
+
+        for (line in lines) {
+            val t = line.trim()
+            when {
+                t.startsWith("- ") -> {
+                    flush()
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Text("•", style = MaterialTheme.typography.bodyMedium, fontWeight = weight)
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            t.removePrefix("- "),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = weight,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+                t.isEmpty() -> {
+                    flush()
+                    Spacer(Modifier.height(10.dp))
+                }
+                else -> paragraph.append(if (paragraph.isEmpty()) t else " $t")
+            }
+        }
+        flush()
+    }
+}
+
 /** Step one: why the app needs to know where you are. */
 @Composable
-fun LocationOnboarding(onContinue: () -> Unit, onNotNow: () -> Unit) = OnboardingStep(
+fun LocationOnboarding(
+    hidesLogo: Boolean = false,
+    onLogoBounds: (Rect) -> Unit = {},
+    onContinue: () -> Unit,
+    onNotNow: () -> Unit,
+) = OnboardingStep(
+    showLogo = true,
+    hidesLogo = hidesLogo,
+    onLogoBounds = onLogoBounds,
     title = "Songitude",
-    subtitle = "Music composed onto a map.",
-    body = "As you walk, your position decides which layers of the music you hear. Songitude uses " +
-        "your location only on this phone, only while a walk is playing, to choose what sounds. " +
-        "It is never uploaded, stored or shared, and no account is needed.",
+    subtitle = "music on the map",
+    body = """
+        - Your position changes the music you hear.
+        - Songitude only uses your location locally on this phone.
+        - It is never uploaded, stored or shared.
+    """.trimIndent(),
     onContinue = onContinue,
     onNotNow = onNotNow,
 )
@@ -80,13 +160,12 @@ fun LocationOnboarding(onContinue: () -> Unit, onNotNow: () -> Unit) = Onboardin
 fun NotificationOnboarding(onContinue: () -> Unit, onNotNow: () -> Unit) = OnboardingStep(
     title = "One more thing",
     subtitle = "So the music keeps playing.",
-    body = "A soundwalk is meant to be heard with the phone in your pocket and the screen off. " +
-        "Android only lets an app keep audio and GPS running in the background if it can show a " +
-        "playback control while it does — so Songitude needs permission to post one. It is also " +
-        "how you pause from the lock screen.",
-    footnote = "We will never send you a notification. Nothing is ever pushed at you — no alerts, " +
-        "no announcements, no reminders. The only thing that appears is the playback control, and " +
-        "only while a walk is actually playing.",
+    body = """
+        - For the best experience, you might want to lock your phone and put it in your pocket.
+        - In order to keep giving you location-accurate audio, we need permission to run in the background.
+    """.trimIndent(),
+    footnote = "We will never send you a notification. " +
+        "Nothing is ever pushed at you — no alerts, no announcements, no reminders.",
     onContinue = onContinue,
     onNotNow = onNotNow,
 )

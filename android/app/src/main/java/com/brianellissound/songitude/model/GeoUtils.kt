@@ -103,10 +103,8 @@ class WalkTransposition(anchor: WalkAnchor, listener: LatLngD, heading: Double) 
 
 /**
  * A copy of this walk moved and turned onto the listener. Radii are untouched — only positions
- * move — so every area keeps its authored size and relative bearing.
- *
- * Labels are deliberately left where they were authored, matching iOS. See the note in the Android
- * port README: this looks like an iOS bug, but parity wins until the iOS side changes.
+ * move — so every area keeps its authored size and relative bearing. Shapes, routes and labels all
+ * travel: anything left behind would sit where the walk was drawn, not where it is heard.
  */
 fun SoundMap.transposed(t: WalkTransposition): SoundMap = copy(
     center = center?.let { t.apply(it) },
@@ -119,6 +117,9 @@ fun SoundMap.transposed(t: WalkTransposition): SoundMap = copy(
     // Routes travel with the walk too — a suggested path left behind where the walk was authored
     // would point the listener at nothing.
     routes = routes?.map { r -> r.copy(points = r.points.map { t.apply(it) }) },
+    // And labels, for the same reason. FORMAT.md has always specified this; iOS simply missed it
+    // when labels replaced the routes' old endpoint captions.
+    labels = labels?.map { l -> l.copy(point = t.apply(l.point)) },
 )
 
 /**

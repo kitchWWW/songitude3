@@ -13,15 +13,20 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.brianellissound.songitude.ui.MapScreen
 import com.brianellissound.songitude.ui.SongitudeTheme
+import com.brianellissound.songitude.ui.SplashOverlay
+import com.brianellissound.songitude.ui.SplashPhase
 import com.brianellissound.songitude.ui.screens.ArtistPageScreen
 import com.brianellissound.songitude.ui.screens.LocationOnboarding
 import com.brianellissound.songitude.ui.screens.NotificationOnboarding
 import com.brianellissound.songitude.ui.screens.SettingsScreen
-import com.brianellissound.songitude.ui.screens.SplashScreen
 import com.brianellissound.songitude.ui.screens.WalksBrowserScreen
 
 /** Where the UI currently is. Plain state rather than a nav graph: the app is one screen with a
@@ -67,7 +72,13 @@ private fun Root(app: AppState, deepLink: Uri?) {
     val current by app.current.collectAsState()
     val context = LocalContext.current
 
-    var splashDone by rememberSaveable(resetToken) { mutableStateOf(false) }
+    // The splash runs over the real UI and hands its tile to the onboarding logo, so both are
+    // composed at once rather than one replacing the other.
+    var splashPhase by remember(resetToken) {
+        mutableStateOf(if (app.splashSeen) SplashPhase.DONE else SplashPhase.WAVES)
+    }
+    var logoTarget by remember(resetToken) { mutableStateOf<Rect?>(null) }
+    val splashDone = splashPhase == SplashPhase.DONE
     var route by remember { mutableStateOf<Route>(Route.Map) }
     var didAutoOpenBrowser by remember { mutableStateOf(false) }
 
@@ -114,10 +125,14 @@ private fun Root(app: AppState, deepLink: Uri?) {
         }
     }
 
+    Box(Modifier.fillMaxSize()) {
     when {
-        !splashDone -> SplashScreen(onDone = { splashDone = true })
         !hasOnboarded -> when (onboardStep) {
             0 -> LocationOnboarding(
+                // While the splash still owns the logo, the slot reserves its space and draws
+                // nothing, so the incoming tile lands on an empty spot rather than a duplicate.
+                hidesLogo = !splashDone,
+                onLogoBounds = { logoTarget = it },
                 onContinue = {
                     foregroundLauncher.launch(
                         arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
@@ -151,6 +166,17 @@ private fun Root(app: AppState, deepLink: Uri?) {
                 onOpenWalk = { w -> app.openRemote(w); route = Route.Map },
             )
         }
+    }
+
+    SplashOverlay(
+        phase = splashPhase,
+        logoTarget = logoTarget,
+        resetToken = resetToken,
+        onPhase = { p ->
+            splashPhase = p
+            if (p == SplashPhase.DONE) app.markSplashSeen()
+        },
+    )
     }
 
     if (showPermissionAlert) {
