@@ -80,14 +80,16 @@ struct SettingsView: View {
                 let c = app.currentRemoteWalk?.creatorText ?? app.selectedExperience?.map.creator ?? ""
                 return c.isEmpty ? nil : c
             }()
-            Button(ReportKind.walk.buttonTitle(walk: walk, artist: artist)) { reporting = .walk }
-                .disabled(walk == nil)
-            Button(ReportKind.artist.buttonTitle(walk: walk, artist: artist)) { reporting = .artist }
-                .disabled(artist == nil)
-            Button(ReportKind.issue.buttonTitle(walk: walk, artist: artist)) { reporting = .issue }
-            if let mail = URL(string: "mailto:brian.e2014@gmail.com") {
-                Link("Email brian.e2014@gmail.com", destination: mail).font(.footnote)
+            // A greyed row reads as a broken button. With no walk open there is simply nothing to
+            // name, so these two are absent rather than disabled.
+            if let walk {
+                Button(ReportKind.walk.buttonTitle(walk: walk, artist: artist)) { reporting = .walk }
             }
+            if let artist {
+                Button(ReportKind.artist.buttonTitle(walk: walk, artist: artist)) { reporting = .artist }
+            }
+            // Always offered: a bug report about the app itself doesn't depend on a loaded walk.
+            Button(ReportKind.issue.buttonTitle(walk: walk, artist: artist)) { reporting = .issue }
         }
     }
 
@@ -122,7 +124,7 @@ struct SettingsView: View {
     private var creditsSection: some View {
         Section("Credits") {
             creditRow(name: "Brian Ellis", role: "Creative Coder",
-                      url: "http://brianellissound.com")
+                      url: "https://brianellissound.com")
         }
     }
 

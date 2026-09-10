@@ -15,8 +15,10 @@ open Songitude/Songitude.xcodeproj
    Simulator can only fake a static location.
 3. Run.
 
-The project already includes a working demo bundle (`Experiences/sample-wave-hill.zip`) with
-three areas — a looping pad, a one-shot chime, and a dialogue narration — so it runs out of the box.
+No walks ship inside the app any more — the bundled demos were dropped, so `Experiences/` is empty
+and `Bundled/` builds empty. On first launch the app opens the walks browser and pulls the catalog
+from `walks/manifest.json`, so a network connection is needed to hear anything. Drop a `.zip` into
+`Experiences/` if you want one baked into the build.
 
 ## Adding / updating experiences
 
@@ -29,7 +31,7 @@ The app holds several at once — pick between them in **Settings → Debug → 
 
 | Requirement | Where |
 |---|---|
-| GPS permission + onboarding | `OnboardingView`, `LocationManager`, big "Enable location permissions" button |
+| GPS permission + onboarding | `OnboardingView`, `LocationManager`. The advance button says "Continue", never "Enable" — App Review 5.1.1(iv) rejected the older wording for dressing the button up as consent. |
 | Denied-permission alert | `OnboardingView` / `ContentView` alerts |
 | Layered loop / one-shot / dialogue playback with fades | `AudioEngine.swift` (AVAudioEngine) — same state machine as the editor preview |
 | Big play/pause = engine on/off | `ContentView.playButton` → `RenderEngine.toggle()` |

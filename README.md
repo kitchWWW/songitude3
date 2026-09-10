@@ -36,5 +36,5 @@ See `ios/README.md` for details.
 
 ## Credits
 
-- **Brian Ellis** — Creative Coder — <http://brianellissound.com>
+- **Brian Ellis** — Creative Coder — <https://brianellissound.com>
 - **Chromic Duo** (Lucy Yao & Dorothy Chan) — Composer & Creative Director — <https://www.chromic.space>

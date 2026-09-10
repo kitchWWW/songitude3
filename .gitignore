@@ -15,3 +15,6 @@ ios/Songitude/Experiences/magic_square.zip
 
 # Scratch
 *.log
+
+# Demo videos for App Review — over GitHub's 100 MB file limit; kept locally only.
+docs/demo-videos/*.mp4

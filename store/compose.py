@@ -13,7 +13,7 @@ SHOTS = [
     dict(shot="IMG_2710.PNG", backdrop="IMG_2710.PNG", punch=1.8,
          head="Songitude",
          sub="music on the map"),
-    dict(shot="IMG_2704.PNG", backdrop="IMG_2705.PNG", punch=2.4,
+    dict(shot="IMG_3212.PNG", backdrop="IMG_2705.PNG", punch=2.4,
          head="Find a walk near you",
          sub="Sorted by distance\nplus walks you can play anywhere"),
     dict(shot="IMG_2705.PNG", backdrop="IMG_2705.PNG", punch=2.4,

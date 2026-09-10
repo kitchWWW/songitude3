@@ -72,10 +72,14 @@ struct ContentView: View {
                         }
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
-                    HStack(spacing: 20) {
-                        skipButton(by: -RenderEngine.skipInterval)
-                        playButton
-                        skipButton(by: RenderEngine.skipInterval)
+                    // Transport is meaningless with nothing loaded — no clip to start, nowhere
+                    // to skip to. With no walk selected the map is just a map.
+                    if app.selectedExperience != nil {
+                        HStack(spacing: 20) {
+                            skipButton(by: -RenderEngine.skipInterval)
+                            playButton
+                            skipButton(by: RenderEngine.skipInterval)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity)

@@ -229,10 +229,15 @@ final class ArtworkCache: ObservableObject {
         return c
     }()
     private var inFlight: Set<String> = []
+    /// Failed attempts per url, so a transient failure retries instead of leaving the row on its
+    /// placeholder forever. Cleared once the image lands.
+    private var attempts: [String: Int] = [:]
+    private static let maxAttempts = 3
     private let session: URLSession = {
         let cfg = URLSessionConfiguration.default
         cfg.urlCache = URLCache(memoryCapacity: 8 << 20, diskCapacity: 128 << 20, diskPath: "songitude-artwork")
         cfg.requestCachePolicy = .returnCacheDataElseLoad
+        cfg.timeoutIntervalForRequest = 30      // album art is multi-MB over a walking phone's radio
         return URLSession(configuration: cfg)
     }()
 
@@ -241,20 +246,42 @@ final class ArtworkCache: ObservableObject {
     func load(_ url: String) {
         guard image(for: url) == nil, !inFlight.contains(url), let u = URL(string: url) else { return }
         inFlight.insert(url)
-        session.dataTask(with: u) { [weak self] data, _, _ in
+        session.dataTask(with: u) { [weak self] data, response, _ in
+            // A non-2xx reply still carries a body — S3 answers with an XML error document — so
+            // check the status rather than handing that XML to the decoder and calling it a
+            // corrupt image.
+            let ok = (response as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false
             // Downsample before caching. Album art is multi-megabyte; a 4 MB JPEG decodes to tens
             // of MB of pixels, and NSCache throws away any object whose cost exceeds its total
             // limit — so caching full-size images silently evicted almost all of them.
-            let image = data.flatMap { Self.thumbnail(from: $0, maxPixel: 256) }
+            let image = (ok ? data : nil).flatMap { Self.thumbnail(from: $0, maxPixel: 256) }
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.inFlight.remove(url)
-                guard let image = image else { return }
+                guard let image = image else {
+                    // Nothing was cached and no generation bump follows, so the row would keep its
+                    // placeholder until .onAppear fired again — which a row already on screen never
+                    // does. Retry instead, or the failure is permanent for this appearance.
+                    self.scheduleRetry(url)
+                    return
+                }
+                self.attempts[url] = nil
                 let bytes = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
                 self.memory.setObject(image, forKey: url as NSString, cost: bytes)
                 self.generation &+= 1
             }
         }.resume()
+    }
+
+    /// Back off and try again, a few times. Nine walks fetch their art at once on a phone that may
+    /// also be pulling a 150 MB bundle, so the odd timeout is expected and shouldn't be terminal.
+    private func scheduleRetry(_ url: String) {
+        let n = (attempts[url] ?? 0) + 1
+        attempts[url] = n
+        guard n < Self.maxAttempts else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + pow(2.0, Double(n))) { [weak self] in
+            self?.load(url)
+        }
     }
 
     /// Decode straight to thumbnail size — never allocates the full-resolution bitmap.
