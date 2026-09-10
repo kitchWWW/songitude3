@@ -1,0 +1,67 @@
+CHANGES IN THIS BUILD — 1.0 (11)
+
+Guideline 2.1(a), the unresponsive button. We found it: the Report screen. In Settings > Report,
+the "Report <walk name>" and "Report <artist name>" rows were disabled whenever no soundwalk was
+loaded, because there was nothing to name. On the review device that is the ordinary state, since
+almost every walk is tied to real coordinates elsewhere and none loads by default — so two buttons
+appeared on screen and did nothing when tapped. They are now hidden when there is nothing to name
+rather than greyed out, and "Report an issue" is always available. The map follows the same rule:
+play and skip no longer appear when no walk is loaded.
+
+Guideline 5.1.1(iv), the permission request. The screen shown before the system location prompt no
+longer uses the word "Enable". The button that advances now reads "Continue", and the screen
+explains only what the app does with location. The other choice is "Not now", which dismisses
+without requesting anything.
+
+Guideline 2.1, demo video, recorded on a physical iPhone running this build:
+https://drive.google.com/drive/folders/1ENtu5j0dA9xBpT8iWo9p3Sy9xvea1ZBp?usp=sharing
+It shows first launch from a clean install, the location permission request, a walk downloading and
+playing, the map responding to movement, and audio continuing with the screen locked.
+
+DEVICE SUPPORT
+
+Songitude is an iPhone app (TARGETED_DEVICE_FAMILY = 1). There is no iPad build or interface. It
+requires GPS hardware (UIRequiredDeviceCapabilities: gps, location-services) because the experience
+is a person walking through a real place while the audio responds to their position. Wi-Fi-only
+iPads have no GPS and cannot install it. We ask that review be done on an iPhone, the only device
+the app is designed for and the only one where its core behaviour can be observed.
+
+HOW IT WORKS
+
+Songitude plays music composed on a map. As the listener walks, GPS decides which audio layers
+are audible. Location is used only on the device, in the moment, to choose what plays; it is never
+uploaded, stored or shared, and is requested only while a walk is playing. No account is needed.
+
+TO TEST
+
+Allow location and pick a walk. Audio is tied to real coordinates, so use a simulated location near
+a walk, or choose one from "Listen From Anywhere" — those arrange themselves around wherever you
+stand and work from any location, including inside the review facility. Try "Lament for Zoid":
+open it, press play, and walk a few metres to hear the layers change.
+
+USER-GENERATED CONTENT — GUIDELINE 1.2
+
+Audio cannot be created or uploaded from inside the app. It is listen-only, downloading finished
+walks from our public catalog; walks are composed and published on our website. We declare UGC
+because those walks are authored by composers other than us.
+
+1. FILTERING BEFORE POSTING. Publishing is invite-only, gated by a server-side allowlist of Google
+accounts we approve by hand; an account not on the list cannot publish. The list holds only
+composers we know personally. Before publishing, a composer must confirm they hold full rights to
+every piece of audio; publishing is blocked until they do, and both their timestamp and our
+server's receipt time are recorded.
+
+2. REPORTING. Settings > Report offers "Report [walk]", "Report [artist]" and "Report an issue",
+with the current walk and artist filled in. Each emails us directly, read by a person
+normally the same day. Also documented at https://songitude.com/support/index.html
+
+3. REMOVAL AND BLOCKING. Every walk is owned by an identified Google account, so it traces to a
+person. We can delete a walk immediately and remove a composer from the allowlist permanently.
+
+4. PUBLISHED CONTACT. The in-app report forms reach us by email. Our address is also published on
+our support page and in our privacy policy.
+
+PRIVACY
+
+The app collects nothing: no accounts, no analytics, no third-party SDKs, and location never leaves
+the device. Policy: https://songitude.com/privacy/index.html
