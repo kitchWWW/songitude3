@@ -1,10 +1,13 @@
 package com.brianellissound.songitude.ui
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
@@ -16,6 +19,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
@@ -26,8 +30,10 @@ import kotlinx.coroutines.launch
 /** Where the launch animation has got to. */
 enum class SplashPhase { WAVES, FLYING, DONE }
 
-/** The mark's own size on the splash. The onboarding slot is 100dp, so it halves as it flies. */
-private const val SPLASH_TILE_DP = 200f
+/** The mark's own size on the splash — matched to what the system splash draws, so the animation
+ *  opens on exactly the picture the system handed over. The onboarding slot is 100dp, so it shrinks
+ *  as it flies. */
+private const val SPLASH_TILE_DP = 168f
 
 /** Everything after the opening hold runs this many times faster than its written timings. */
 private const val PACE = 1.5
@@ -58,10 +64,23 @@ fun SplashOverlay(
 
     // Which wave the pulse is passing through; -1 is at rest.
     var pulse by remember(resetToken) { mutableIntStateOf(-1) }
+
+    // Each wave eases to its new opacity rather than snapping. iOS wraps the pulse in
+    // `withAnimation(.easeInOut(duration: 0.6 / pace))`, and without the equivalent the three waves
+    // just blink between values — which is what made the sequence read as steps rather than as a
+    // pulse travelling outward.
+    val waveDuration = beat(0.6).toInt()
+    val w0 by animateFloatAsState(waveOpacity(0, pulse), tween(waveDuration, easing = FastOutSlowInEasing), label = "w0")
+    val w1 by animateFloatAsState(waveOpacity(1, pulse), tween(waveDuration, easing = FastOutSlowInEasing), label = "w1")
+    val w2 by animateFloatAsState(waveOpacity(2, pulse), tween(waveDuration, easing = FastOutSlowInEasing), label = "w2")
     val scale = remember(resetToken) { Animatable(1f) }
     val dx = remember(resetToken) { Animatable(0f) }
     val dy = remember(resetToken) { Animatable(0f) }
     val backdrop = remember(resetToken) { Animatable(1f) }
+    // The system splash can only be given a flat colour on Android 12+, so it hands over on solid
+    // black. The wash blooms out of that rather than replacing it in one frame, which is what makes
+    // the seam between the two invisible.
+    val wash = remember(resetToken) { Animatable(0f) }
     // The mark is white against the splash's dark wash and has to become the theme's own colour by
     // the time it lands on the onboarding screen, which may well be white itself.
     val landed = MaterialTheme.colorScheme.onBackground
@@ -73,6 +92,10 @@ fun SplashOverlay(
     val scope = rememberCoroutineScope()
 
     var rootSize by remember { mutableStateOf(Offset.Zero) }
+
+    LaunchedEffect(resetToken) {
+        wash.animateTo(1f, tween(beat(0.9).toInt(), easing = FastOutSlowInEasing))
+    }
 
     LaunchedEffect(resetToken) {
         delay(1000)                       // hold on the logo before it stirs
@@ -118,11 +141,24 @@ fun SplashOverlay(
             Modifier
                 .fillMaxSize()
                 .alpha(backdrop.value)
-                .background(
-                    Brush.radialGradient(
-                        listOf(Color.Black, Color(0xFF121317), Color(0xFF4D525C)),
+                .drawBehind {
+                    // Compose's radialGradient defaults to half the *minimum* dimension, which on a
+                    // tall phone barely leaves the middle of the screen — it read as a small dark
+                    // blob rather than a wash. iOS uses max(w, h) * 0.62, so the darkness reaches
+                    // for the corners; match that.
+                    val t = wash.value
+                    drawRect(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                Color.Black,
+                                lerp(Color.Black, Color(0xFF121317), t),
+                                lerp(Color.Black, Color(0xFF4D525C), t),
+                            ),
+                            center = center,
+                            radius = maxOf(size.width, size.height) * 0.62f,
+                        )
                     )
-                )
+                }
         )
         Box(
             Modifier
@@ -136,7 +172,7 @@ fun SplashOverlay(
         ) {
             SongitudeMark(
                 Modifier.size(SPLASH_TILE_DP.dp),
-                waveOpacity = { i -> waveOpacity(i, pulse) },
+                waveOpacity = { i -> when (i) { 0 -> w0; 1 -> w1; else -> w2 } },
                 stroke = markColor.value,
             )
         }

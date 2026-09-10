@@ -12,6 +12,7 @@ import android.media.AudioRouting
 import android.media.AudioTrack
 import android.os.Handler
 import android.os.Looper
+import com.brianellissound.songitude.BuildConfig
 import com.brianellissound.songitude.model.CoordinateOffset
 import com.brianellissound.songitude.model.DialogueState
 import com.brianellissound.songitude.model.Experience
@@ -101,6 +102,8 @@ class RenderEngine(private val context: Context) {
     private val loadingFiles = HashSet<String>()
     private var loadToken = 0
     private var lastCoord: LatLngD? = null
+    private var locationTicks = 0L
+    private var lastResidencyPass = 0L
 
     /** Where decoded PCM is kept for the loaded walk. Cleared with the walk, so a deleted walk
      *  doesn't leave hundreds of megabytes of raw audio behind. */
@@ -188,12 +191,15 @@ class RenderEngine(private val context: Context) {
     private var doneRunnable: Runnable? = null
 
     companion object {
+        private const val TAG = "SongitudeEngine"
         /** How far one press of a skip button moves every voice. */
         const val SKIP_INTERVAL_SECONDS = 15.0
         /** Don't replay a walk's intro within an hour — the gate exists to survive a resume, not a
          *  reinstall. */
         private const val INTRO_GATE_SECONDS = 3600.0
         private const val DONE_DELAY_MS = 30_000L
+        /** Residency is re-decided about once a second, regardless of the location tick rate. */
+        private const val RESIDENCY_INTERVAL_MS = 1000L
         const val INTRO_GATE_KEY_PREFIX = "songitude.intro."
         fun introGateKey(walkId: String) = INTRO_GATE_KEY_PREFIX + walkId
         /** Holds `dialoguePlaying` while the intro narration runs. It is not a shape id, so every
@@ -254,18 +260,35 @@ class RenderEngine(private val context: Context) {
     }
     private var noisyRegistered = false
 
-    /** Hardware route changed underneath us — Bluetooth connecting, a dock, a USB DAC. The track was
-     *  built for the old device and may now be rendering nowhere. iOS rebuilds its graph on
-     *  AVAudioEngineConfigurationChange for exactly this; this is the same move. */
-    private val routingListener = AudioRouting.OnRoutingChangedListener {
+    /** The device the current track is routed to, so a callback can be told from a real change. */
+    private var routedDeviceId: Int? = null
+
+    /**
+     * Hardware route changed underneath us — Bluetooth connecting, a dock, a USB DAC. The track was
+     * built for the old device and may now be rendering nowhere. iOS rebuilds its graph on
+     * AVAudioEngineConfigurationChange for exactly this; this is the same move.
+     *
+     * The device check is essential, not defensive. AudioTrack fires this when routing is first
+     * *established*, not only when it changes — so rebuilding on every callback meant: new track,
+     * routing established, rebuild, new track, forever. It ran about ten times a second, destroying
+     * every voice before its fade could finish, which looked like a walk flickering on and off with
+     * a perfectly stationary listener.
+     */
+    private val routingListener = AudioRouting.OnRoutingChangedListener { router ->
+        val id = runCatching { router.routedDevice?.id }.getOrNull()
         main.post {
             if (!_isRunning.value || wasInterrupted) return@post
+            if (id == null) return@post                  // routing not resolved yet
+            val previous = routedDeviceId
+            routedDeviceId = id
+            if (previous == null || previous == id) return@post   // first resolution, or no change
             rebuildGraph()
         }
     }
 
     /** Tear the output down and bring it back with playback intact. */
     private fun rebuildGraph() {
+        if (BuildConfig.DEBUG) android.util.Log.i(TAG, "graph rebuild (route changed)")
         teardownAudio()
         if (!bringUpAudio()) setRunning(false)
     }
@@ -372,6 +395,7 @@ class RenderEngine(private val context: Context) {
 
     /** Bring up the track and mixer and resume region evaluation from the last known fix. */
     private fun bringUpAudio(): Boolean {
+        if (BuildConfig.DEBUG) android.util.Log.i(TAG, "bringUpAudio")
         if (!requestFocus()) return false
         if (!noisyRegistered) {
             context.registerReceiver(noisyReceiver, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
@@ -420,6 +444,7 @@ class RenderEngine(private val context: Context) {
     /** Stop and drop every voice and free audio memory, leaving isRunning and the loaded experience
      *  untouched. Used by stop() and by focus-driven suspend. */
     private fun teardownAudio() {
+        if (BuildConfig.DEBUG) android.util.Log.i(TAG, "teardownAudio")
         stopMixThread()
         synchronized(lock) {
             voices.clear()
@@ -440,6 +465,7 @@ class RenderEngine(private val context: Context) {
             track?.pause(); track?.flush(); track?.release()
         } catch (_: Throwable) {}
         track = null
+        routedDeviceId = null
         loadToken++              // invalidate any in-flight decodes
         syncedStarted = false
         syncedEpochFrame = null
@@ -558,8 +584,27 @@ class RenderEngine(private val context: Context) {
 
     fun updateLocation(coord: LatLngD) {
         lastCoord = coord
+        if (BuildConfig.DEBUG) {
+            val n = ++locationTicks
+            // One line a second at the 10 Hz tick rate: enough to see the position wander, without
+            // burying the sounding transitions that matter.
+            if (n % 10 == 0L) {
+                android.util.Log.d(
+                    TAG,
+                    String.format("pos %.6f,%.6f inside=%d", coord.lat, coord.lng,
+                        shapes.count { GeoUtils.contains(it, coord, offset) }),
+                )
+            }
+        }
         if (!_isRunning.value || outroActive) return   // freeze location-driven playback during the outro
-        updateResidency(coord)
+        // Containment and fades want the full tick rate; residency does not. Deciding what to
+        // decode and evict is about metres and megabytes, and running it ten times a second would
+        // measure every polygon's every vertex for nothing.
+        val now = System.currentTimeMillis()
+        if (now - lastResidencyPass >= RESIDENCY_INTERVAL_MS) {
+            lastResidencyPass = now
+            updateResidency(coord)
+        }
         startSyncedLoopsIfReady()
 
         val nowInside = HashSet<String>()
@@ -829,6 +874,7 @@ class RenderEngine(private val context: Context) {
     private fun startLoop(shape: SoundShape, target: Float) {
         val file = shape.audioFile ?: return
         val raw = synchronized(lock) { bufferCache[file] } ?: return
+        if (BuildConfig.DEBUG) android.util.Log.d(TAG, "startLoop ${'$'}{shape.id} target=${'$'}target")
         // Crossfade loops play a baked seamless buffer; simple loops play the raw clip.
         val buf = if (shape.isCrossfadeLoop) crossfadeBufferFor(shape, raw) else raw
         val v = Voice()
@@ -860,6 +906,7 @@ class RenderEngine(private val context: Context) {
 
     private fun stopLoop(shape: SoundShape) {
         val v = synchronized(lock) { voices.remove(shape.id) } ?: return
+        if (BuildConfig.DEBUG) android.util.Log.d(TAG, "stopLoop ${'$'}{shape.id}")
         fadeOutAndDrop(v, max(0.02, shape.fadeOut))
     }
 
@@ -1176,7 +1223,18 @@ class RenderEngine(private val context: Context) {
         val ids = synchronized(lock) {
             voices.filter { it.value.target > 0.02f }.keys.toSet()
         }
-        if (ids != _soundingShapeIds.value) _soundingShapeIds.value = ids
+        if (ids != _soundingShapeIds.value) {
+            // Logged because this is the signal that matters when a walk flickers: what changed, and
+            // against which position. A stationary map dot proves nothing — the map draws the
+            // system's own smoothed location, while the engine tests a different value entirely.
+            val c = lastCoord
+            if (BuildConfig.DEBUG) android.util.Log.i(
+                TAG,
+                "sounding ${_soundingShapeIds.value.size}->${ids.size} $ids at " +
+                    (c?.let { String.format("%.6f,%.6f", it.lat, it.lng) } ?: "no fix"),
+            )
+            _soundingShapeIds.value = ids
+        }
     }
 
     /** Apply a transport change from outside the app — the notification, a headphone button, an

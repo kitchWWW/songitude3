@@ -1,3 +1,7 @@
 <resources>
+    <!-- The splash's own centre colour, for the launch window only. -->
     <color name="launch_background">#000000</color>
+    <!-- The ordinary window background behind the app, matching the Compose theme's surface so a
+         transition never flashes a colour the app doesn't use. -->
+    <color name="app_background">#FFFFFF</color>
 </resources>

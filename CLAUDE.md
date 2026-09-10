@@ -9,6 +9,7 @@ the real space and hear it via GPS. One bundle format is shared across every com
 |-----|-----------|-------|
 | `editor/` | Front-end-only authoring app. Draw shapes, assign audio, preview with a virtual listener, export/import `.zip`, publish. | Vanilla JS IIFE, no build step. Leaflet + JSZip + qrcode-generator + Google Identity, all via CDN. |
 | `ios/` | SwiftUI app that plays a bundle for real using GPS, with background audio. | SwiftUI, AVAudioEngine, CoreLocation, MapKit. |
+| `android/` | The same player for Android: same bundles, same catalog, same playback rules. | Kotlin, Jetpack Compose, one `AudioTrack` + a software mixer, fused location, Google Maps. |
 | `web/` | Marketing site, browser player (`listen/`), privacy/support pages, deep-link landing (`w.html`), AASA. | Vanilla JS + Leaflet. |
 | `aws/` | Serverless publish backend: two Node 20 Lambdas + an S3 bucket. | AWS SDK v3, `adm-zip`. |
 | `shared/FORMAT.md` | **Source of truth** for the bundle format. Update it when the format changes. | — |
@@ -36,16 +37,20 @@ editors keep playing in newer apps/players without migration. When you add or ch
 - **A missing field must decode to the old behavior.** Every reader supplies the historical default
   when the key is absent (e.g. `loopMode` absent ⇒ `"simple"`; `dialogueColors`/`intro`/`exit` absent
   ⇒ none). iOS relies on optional Swift properties + fallbacks; JS uses `x ?? default`.
-- Apply the default in **all four readers** (editor, web player, iOS, and the manifest Lambda if it
-  reads the field) and document the new field + its default in `shared/FORMAT.md`.
+- Apply the default in **all five readers** (editor, web player, iOS, Android, and the manifest
+  Lambda if it reads the field) and document the new field + its default in `shared/FORMAT.md`.
 - Don't gate a new field behind a `version` bump that old readers reject — bump `version` only for a
   genuinely breaking change, which we avoid.
 
-### Playback modes — semantics MUST stay identical in all three engines
+### Playback modes — semantics MUST stay identical in all FOUR engines
 
-The editor preview (`editor/editor.js` `engine`), the web player (`web/listen/player.js`), and the
-iOS app (`ios/.../AudioEngine.swift`) each implement the same state machine. **Change one → change
-all three** (and `FORMAT.md`).
+The editor preview (`editor/editor.js` `engine`), the web player (`web/listen/player.js`), the iOS
+app (`ios/.../AudioEngine.swift`) and the Android app (`android/.../audio/RenderEngine.kt`) each
+implement the same state machine. **Change one → change all four** (and `FORMAT.md`).
+
+There is no "primary" implementation. A fix to a mode, a fade, the dialogue queue, solo ducking or
+the intro/exit sequence is not finished until it exists in all four — a walk has to sound the same
+wherever it is heard, and the format is the only contract holding that together.
 
 - `loop` — loops while inside; fades in/out; circle loops honor `falloff` (proximity gain).
 - `syncedLoop` — all synced clips launch sample-aligned at one shared start time and run forever;
@@ -85,9 +90,31 @@ all three** (and `FORMAT.md`).
 - Bundles come from `Bundled/` (unzipped from `Experiences/*.zip` at build time by
   `import_experiences.sh`) or downloaded from the remote catalog into Caches — both yield the same
   `Experience` struct.
-- Can't build here (no Xcode SDK) — SourceKit "cannot find type" / "No such module 'UIKit'" errors
-  in this environment are cross-file resolution noise, not real. Verify in Xcode on a device (GPS +
-  background audio need real hardware).
+- Xcode **is** installed here, so `ios/` builds and installs to a device headlessly with
+  `xcodebuild` + `xcrun devicectl` — no need to open the IDE. SourceKit "cannot find type" / "No such
+  module 'UIKit'" errors from an editor are cross-file resolution noise, not real. GPS and background
+  audio still need real hardware to actually verify.
+
+## Android notes (`android/`)
+
+- `AppState.kt` mirrors `AppState.swift`. The **engine, location manager and the loaded walk live on
+  the `Application`**, not the Activity: Android destroys the Activity while a walk plays with the
+  screen off, and anything Activity-scoped would take the walk down or make the app forget it.
+- `audio/RenderEngine.kt` runs **one `AudioTrack` and mixes every voice itself**. iOS can give each
+  area its own player node and lean on `AVAudioTime`; Android has no equivalent cross-player
+  guarantee, and `syncedLoop` is defined by sample alignment — one clock makes it true by
+  construction.
+- Clips are decoded to 16-bit PCM **on disk and memory-mapped**, at their own rate and channel count.
+  Anything heap-resident dies on `dalvik.vm.heapgrowthlimit` (256 MB); note that
+  `ByteBuffer.allocateDirect` is *not* off-heap on Android. The mixer resamples as it reads.
+- Location updates are **time-based**, never distance-filtered: the fused provider takes a distance
+  filter literally and delivers nothing while the listener stands still.
+- Background playback needs a **foreground service** with a persistent notification, declaring both
+  `mediaPlayback` and `location`. That notification is the lock-screen transport.
+- `PARITY.md` and `LIFECYCLE.md` record every audited difference from iOS and how it was resolved.
+  Add to them rather than rediscovering the same ground.
+- Builds need `JAVA_HOME` pointed at JDK 21 — the machine default is 26, which AGP rejects. The Maps
+  key lives in `android/local.properties`, which is git-ignored.
 
 ## AWS notes (`aws/`)
 
@@ -103,6 +130,9 @@ all three** (and `FORMAT.md`).
 ## Conventions
 
 - Match the surrounding style: terse vanilla JS in the web/editor; documented Swift with `// MARK:`
-  sections in iOS. Comments explain *why*, not *what*.
+  sections in iOS; idiomatic Kotlin with KDoc on Android. Comments explain *why*, not *what* — and on
+  the players especially, why a platform forced a different shape.
 - No frameworks or build steps in the editor/web — keep them CDN-loaded and open-in-browser.
-- When touching playback behavior or the bundle shape, update `FORMAT.md` and all three engines.
+- When touching playback behavior or the bundle shape, update `FORMAT.md` and all four engines
+  (editor preview, web player, iOS, Android). Android is not a port that trails the others; it is a
+  player like any of them.

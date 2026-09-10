@@ -27,6 +27,9 @@ private fun OnboardingStep(
     subtitle: String,
     body: String,
     footnote: String? = null,
+    /** True while a system permission screen is up. The button holds its place and shows a spinner
+     *  rather than letting the next screen appear behind whatever the system is presenting. */
+    busy: Boolean = false,
     /** Screen one carries the logo; the splash flies its tile into this exact slot. */
     showLogo: Boolean = false,
     /** True while the splash still owns the logo. The slot reserves the space but draws nothing, so
@@ -70,11 +73,25 @@ private fun OnboardingStep(
                 CopyBlock(footnote, bold = true)
             }
             Spacer(Modifier.height(40.dp))
-            Button(onClick = onContinue, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                Text("Continue")
+            Button(
+                onClick = onContinue,
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+            ) {
+                if (busy) {
+                    // Android's own permission UI can take a moment to appear, and a dead-looking
+                    // button in that gap reads as a missed tap. The spinner is the acknowledgement.
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                } else {
+                    Text("Continue")
+                }
             }
             Spacer(Modifier.height(12.dp))
-            TextButton(onClick = onNotNow) { Text("Not now") }
+            TextButton(onClick = onNotNow, enabled = !busy) { Text("Not now") }
         }
     }
 }
@@ -138,10 +155,12 @@ private fun CopyBlock(text: String, bold: Boolean = false) {
 @Composable
 fun LocationOnboarding(
     hidesLogo: Boolean = false,
+    busy: Boolean = false,
     onLogoBounds: (Rect) -> Unit = {},
     onContinue: () -> Unit,
     onNotNow: () -> Unit,
 ) = OnboardingStep(
+    busy = busy,
     showLogo = true,
     hidesLogo = hidesLogo,
     onLogoBounds = onLogoBounds,
@@ -165,7 +184,12 @@ fun LocationOnboarding(
  * What it does promise is the thing people actually mean: nothing is ever pushed at you.
  */
 @Composable
-fun NotificationOnboarding(onContinue: () -> Unit, onNotNow: () -> Unit) = OnboardingStep(
+fun NotificationOnboarding(
+    busy: Boolean = false,
+    onContinue: () -> Unit,
+    onNotNow: () -> Unit,
+) = OnboardingStep(
+    busy = busy,
     title = "One more thing",
     subtitle = "So the music keeps playing.",
     body = """

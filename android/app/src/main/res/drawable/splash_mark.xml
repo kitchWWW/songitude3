@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Songitude mark for the system splash screen.
+
+     Android 12+ treats this like an adaptive icon: a 288dp canvas of which only the inner two
+     thirds survives a circular mask. The mark therefore spans 58% of the viewport — comfortably
+     inside that — and lands at ~168dp on screen, which is the size the Compose animation opens on
+     so the handover is invisible. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="288dp" android:height="288dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:pathData="M54.00,85.50 L52.38,85.46 L50.76,85.33 L49.15,85.12 L47.56,84.83 L45.98,84.46 L44.42,84.01 L42.89,83.48 L41.39,82.86 L39.92,82.18 L38.48,81.41 L37.09,80.58 L35.75,79.67 L34.45,78.70 L33.21,77.66 L32.01,76.56 L30.88,75.40 L29.81,74.18 L28.81,72.91 L27.87,71.58 L26.99,70.22 L26.20,68.80 L25.47,67.35 L24.82,65.87 L24.25,64.35 L23.76,62.80 L23.34,61.24 L23.01,59.65 L22.76,58.04 L22.59,56.43 L22.51,54.81 L22.51,53.19 L22.59,51.57 L22.76,49.96 L23.01,48.35 L23.34,46.76 L23.76,45.20 L24.25,43.65 L24.82,42.13 L25.47,40.65 L26.20,39.20 L26.99,37.78 L27.87,36.42 L28.81,35.09 L29.81,33.82 L30.88,32.60 L32.01,31.44 L33.21,30.34 L34.45,29.30 L35.75,28.33 L37.09,27.42 L38.48,26.59 L39.92,25.82 L41.39,25.14 L42.89,24.52 L44.42,23.99 L45.98,23.54 L47.56,23.17 L49.15,22.88 L50.76,22.67 L52.38,22.54 L54.00,22.50"
+        android:strokeColor="#FFFFFF" android:strokeWidth="4.57"
+        android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M54.00,22.50 L54.00,85.50"
+        android:strokeColor="#FFFFFF" android:strokeWidth="4.57"
+        android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M24.61,42.66 L54.00,42.66"
+        android:strokeColor="#FFFFFF" android:strokeWidth="4.57"
+        android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M24.61,65.34 L54.00,65.34"
+        android:strokeColor="#FFFFFF" android:strokeWidth="4.57"
+        android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M54.00,22.50 C29.43,37.62 29.43,70.38 54.00,85.50"
+        android:strokeColor="#FFFFFF" android:strokeWidth="4.57"
+        android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M61.37,44.57 L61.85,44.96 L62.31,45.38 L62.74,45.82 L63.15,46.29 L63.54,46.77 L63.90,47.28 L64.24,47.80 L64.55,48.34 L64.83,48.89 L65.08,49.46 L65.30,50.04 L65.49,50.63 L65.65,51.23 L65.77,51.84 L65.87,52.45 L65.93,53.07 L65.97,53.69 L65.97,54.31 L65.93,54.93 L65.87,55.55 L65.77,56.16 L65.65,56.77 L65.49,57.37 L65.30,57.96 L65.08,58.54 L64.83,59.11 L64.55,59.66 L64.24,60.20 L63.90,60.72 L63.54,61.23 L63.15,61.71 L62.74,62.18 L62.31,62.62 L61.85,63.04 L61.37,63.43"
+        android:strokeColor="#FFFFFF" android:strokeWidth="4.57"
+        android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M62.84,34.14 L63.84,34.62 L64.82,35.15 L65.77,35.73 L66.69,36.36 L67.58,37.03 L68.43,37.75 L69.24,38.51 L70.02,39.31 L70.75,40.15 L71.43,41.02 L72.08,41.93 L72.67,42.87 L73.21,43.84 L73.71,44.84 L74.15,45.86 L74.54,46.90 L74.88,47.96 L75.16,49.04 L75.39,50.13 L75.56,51.23 L75.67,52.33 L75.73,53.44 L75.73,54.56 L75.67,55.67 L75.56,56.77 L75.39,57.87 L75.16,58.96 L74.88,60.04 L74.54,61.10 L74.15,62.14 L73.71,63.16 L73.21,64.16 L72.67,65.13 L72.08,66.07 L71.43,66.98 L70.75,67.85 L70.02,68.69 L69.24,69.49 L68.43,70.25 L67.58,70.97 L66.69,71.64 L65.77,72.27 L64.82,72.85 L63.84,73.38 L62.84,73.86"
+        android:strokeColor="#FFFFFF" android:strokeWidth="4.57"
+        android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M60.55,23.19 L62.12,23.57 L63.67,24.02 L65.20,24.56 L66.70,25.17 L68.16,25.86 L69.59,26.63 L70.97,27.46 L72.31,28.37 L73.61,29.34 L74.85,30.38 L76.03,31.49 L77.16,32.65 L78.22,33.86 L79.23,35.13 L80.16,36.45 L81.03,37.82 L81.82,39.23 L82.54,40.68 L83.19,42.16 L83.76,43.68 L84.25,45.22 L84.66,46.78 L84.99,48.37 L85.24,49.97 L85.41,51.58 L85.49,53.19 L85.49,54.81 L85.41,56.42 L85.24,58.03 L84.99,59.63 L84.66,61.22 L84.25,62.78 L83.76,64.32 L83.19,65.84 L82.54,67.32 L81.82,68.77 L81.03,70.18 L80.16,71.55 L79.23,72.87 L78.22,74.14 L77.16,75.35 L76.03,76.51 L74.85,77.62 L73.61,78.66 L72.31,79.63 L70.97,80.54 L69.59,81.37 L68.16,82.14 L66.70,82.83 L65.20,83.44 L63.67,83.98 L62.12,84.43 L60.55,84.81"
+        android:strokeColor="#FFFFFF" android:strokeWidth="4.57"
+        android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

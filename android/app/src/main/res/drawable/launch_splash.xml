@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launch window's first frame, for Android 11 and below where there is no system splash API.
+     Deliberately the same picture the Compose animation opens on: a radial wash from black at the
+     centre out toward the corners, with the mark at 200dp over it. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:type="radial"
+                android:centerX="0.5"
+                android:centerY="0.5"
+                android:gradientRadius="150%p"
+                android:startColor="#000000"
+                android:centerColor="#121317"
+                android:endColor="#4D525C" />
+        </shape>
+    </item>
+    <item
+        android:drawable="@drawable/splash_mark"
+        android:gravity="center"
+        android:width="168dp"
+        android:height="168dp" />
+</layer-list>

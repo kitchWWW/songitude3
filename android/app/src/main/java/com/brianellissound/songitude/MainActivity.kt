@@ -41,6 +41,10 @@ private sealed interface Route {
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Hand back the launch theme. Its window background is the splash picture, and that sits
+        // behind every window in the app — leave it in place and it flashes through every sheet,
+        // screen change and transition.
+        setTheme(R.style.Theme_Songitude)
         super.onCreate(savedInstanceState)
         setContent {
             val app: AppState = viewModel()
@@ -86,23 +90,35 @@ private fun Root(app: AppState, deepLink: Uri?) {
     var route by remember { mutableStateOf<Route>(Route.Map) }
     var didAutoOpenBrowser by remember { mutableStateOf(false) }
 
-    // Foreground location first. Background location has to be a separate request, and Android only
-    // offers it once the foreground grant exists.
-    val backgroundLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { app.onPermissionResult() }
+    // True from the moment Continue is pressed until the system has finished with us. The screen
+    // holds still for the whole of that.
+    var awaitingSystemUi by remember { mutableStateOf(false) }
 
     var onboardStep by rememberSaveable { mutableStateOf(0) }
 
     val notificationLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { app.completeOnboarding() }
+    ) {
+        awaitingSystemUi = false
+        app.completeOnboarding()
+    }
 
     // On anything below Android 13 there is no runtime notification permission, so the second
     // onboarding screen has nothing to ask for and is skipped rather than shown for nothing.
     val advancePastLocation = {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) onboardStep = 1
         else app.completeOnboarding()
+    }
+
+    // Foreground location first. Background location has to be a separate request, and Android only
+    // offers it once the foreground grant exists — and on Android 11+ it opens a full Settings page
+    // rather than a dialog, which is why advancing has to wait for *this* to come back.
+    val backgroundLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) {
+        app.onPermissionResult()
+        awaitingSystemUi = false
+        advancePastLocation()
     }
 
     val foregroundLauncher = rememberLauncherForActivityResult(
@@ -112,9 +128,14 @@ private fun Root(app: AppState, deepLink: Uri?) {
         val fine = granted[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
             granted[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (fine && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Stay on this screen: the background request is about to open Settings, and advancing
+            // now would render the next screen behind it, visible the moment Settings is dismissed
+            // — or, worse, glimpsed before it even appears.
             backgroundLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        } else {
+            awaitingSystemUi = false
+            advancePastLocation()
         }
-        advancePastLocation()
     }
 
     LaunchedEffect(deepLink) { deepLink?.let { app.handleDeepLink(it) } }
@@ -136,8 +157,10 @@ private fun Root(app: AppState, deepLink: Uri?) {
                 // While the splash still owns the logo, the slot reserves its space and draws
                 // nothing, so the incoming tile lands on an empty spot rather than a duplicate.
                 hidesLogo = !splashDone,
+                busy = awaitingSystemUi,
                 onLogoBounds = { logoTarget = it },
                 onContinue = {
+                    awaitingSystemUi = true
                     foregroundLauncher.launch(
                         arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
                     )
@@ -145,7 +168,11 @@ private fun Root(app: AppState, deepLink: Uri?) {
                 onNotNow = { advancePastLocation() },
             )
             else -> NotificationOnboarding(
-                onContinue = { notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+                busy = awaitingSystemUi,
+                onContinue = {
+                    awaitingSystemUi = true
+                    notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                },
                 onNotNow = { app.completeOnboarding() },
             )
         }

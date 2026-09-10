@@ -24,9 +24,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlin.math.ceil
-import kotlin.math.max
-import kotlin.math.min
 
 /** How the app renders light/dark. Defaults to following the phone. */
 enum class AppAppearance(val key: String, val label: String) {
@@ -135,9 +132,11 @@ class AppState(app: Application) : AndroidViewModel(app) {
     private var pendingFarAwayCheck = false
     private var downloadJob: Job? = null
 
-    // GPS slewing: feed the engine a virtual position that eases toward each new fix in small steps,
-    // so a jumpy GPS reading can't teleport across (and skip) a zone.
+    // GPS slewing. The engine never sees a raw fix: it sees a virtual position that eases toward
+    // the newest one on a fixed tick, which both smooths jitter and stops a jumpy reading from
+    // teleporting across (and skipping) a zone.
     private var virtualCoord: LatLngD? = null
+    private var targetCoord: LatLngD? = null
     private var slewJob: Job? = null
 
     val selectedExperience: Experience? get() = _current.value
@@ -155,6 +154,10 @@ class AppState(app: Application) : AndroidViewModel(app) {
         private const val INTRO_WINDOW_SECONDS = 600.0
         /** Far enough that none of a fixed walk can be reached on foot — 50 miles. */
         private const val FAR_AWAY_DISTANCE_M = 80_467.0
+        /** How often the virtual position is eased toward the newest fix, and how much of the old
+         *  position survives each tick. Together they set a time constant near one second. */
+        private const val SLEW_TICK_MS = 100L
+        private const val SLEW_ALPHA = 0.1      // keep 0.9 of where we were
     }
 
     init {
@@ -566,15 +569,19 @@ class AppState(app: Application) : AndroidViewModel(app) {
     private fun primeEngineWithCurrentLocation() {
         val here = location.location.value ?: location.lastKnownLocation
         if (here != null) {
-            virtualCoord = here      // slew starts from here on the next fix
+            virtualCoord = here
+            targetCoord = here
             engine.updateLocation(here)
         }
-        // A fix straight from the hardware, however stale the cached one was. Adopted directly
-        // rather than slewed: this is the listener saying "start here", not a position drifting.
+        // A fix straight from the hardware, however stale the cached one was. Adopted outright
+        // rather than eased into: this is the listener saying "start here", not a reading to be
+        // averaged with wherever they were before.
         location.requestImmediateFix { fresh ->
             virtualCoord = fresh
+            targetCoord = fresh
             engine.updateLocation(fresh)
         }
+        startSlew()
     }
 
     // MARK: - GPS slewing
@@ -583,31 +590,50 @@ class AppState(app: Application) : AndroidViewModel(app) {
      *  can't skip over a zone. Steps are capped so a genuine fast move still catches up within a
      *  few seconds. */
     private fun ingestFix(coord: LatLngD) {
-        val from = virtualCoord
-        if (from == null) {                      // first fix — adopt it directly
+        targetCoord = coord
+        if (virtualCoord == null) {
+            // Nothing to ease from yet — adopt the first fix outright.
             virtualCoord = coord
             engine.updateLocation(coord)
-            return
         }
-        slewJob?.cancel()
-        val steps = max(1, min(25, ceil(GeoUtils.distance(from, coord) / 5.0).toInt()))
+        startSlew()
+    }
+
+    /**
+     * Ease the virtual position toward the newest fix, ten times a second, keeping 90% of where it
+     * already was each tick.
+     *
+     * This is a low-pass filter rather than a threshold, and that distinction matters. GPS jitters a
+     * couple of metres while a listener stands perfectly still, and feeding those raw fixes to the
+     * engine carried them in and out of an area over and over — the map flashed and no fade ever
+     * survived long enough to be heard. A threshold would fix that by discarding small movements,
+     * but it discards *real* small movements too. Smoothing keeps every reading and simply refuses
+     * to believe any single one of them too quickly.
+     *
+     * Retaining 0.9 per 100 ms puts the time constant near a second: noise averages out, while a
+     * genuine walk is followed within a stride. The tick is also what drives the engine, so
+     * containment, falloff and fades are re-evaluated at a steady 10 Hz instead of only when the
+     * provider happens to speak.
+     */
+    private fun startSlew() {
+        if (slewJob?.isActive == true) return
         slewJob = viewModelScope.launch {
-            for (step in 1..steps) {
-                delay(200)
-                val f = step.toDouble() / steps
-                val c = LatLngD(
-                    from.lat + (coord.lat - from.lat) * f,
-                    from.lng + (coord.lng - from.lng) * f,
+            while (true) {
+                delay(SLEW_TICK_MS)
+                val target = targetCoord ?: continue
+                val from = virtualCoord ?: target
+                val next = LatLngD(
+                    from.lat + (target.lat - from.lat) * SLEW_ALPHA,
+                    from.lng + (target.lng - from.lng) * SLEW_ALPHA,
                 )
-                virtualCoord = c
-                engine.updateLocation(c)
+                virtualCoord = next
+                engine.updateLocation(next)
             }
-            slewJob = null
         }
     }
 
     private fun stopSlew() {
-        slewJob?.cancel(); slewJob = null; virtualCoord = null
+        slewJob?.cancel(); slewJob = null; virtualCoord = null; targetCoord = null
     }
 
     // MARK: - Debug: re-center map over me
