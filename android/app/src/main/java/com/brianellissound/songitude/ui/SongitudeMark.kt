@@ -119,6 +119,9 @@ fun LogoTile(
                 )
                 .alpha(tileOpacity)
         )
-        SongitudeMark(Modifier.size(size * 0.68f), waveOpacity = waveOpacity)
+        // 0.578 rather than iOS's 0.68: 15% smaller, matching the launcher icon, so the tile the
+        // splash flies into is the same drawing at the same proportions as the one on the home
+        // screen.
+        SongitudeMark(Modifier.size(size * 0.578f), waveOpacity = waveOpacity)
     }
 }

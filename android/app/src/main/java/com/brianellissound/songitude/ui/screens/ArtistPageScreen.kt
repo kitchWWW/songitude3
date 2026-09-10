@@ -18,6 +18,8 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.brianellissound.songitude.AppState
 import com.brianellissound.songitude.model.parseHexColor
+import com.brianellissound.songitude.ui.MarkdownBody
+import com.brianellissound.songitude.ui.WalkRow
 
 /** An artist's public page: their bio, then everything they have published, in the same two
  *  sections the browser uses. Ported from ios/.../Views/ArtistPageView.swift. */
@@ -32,6 +34,7 @@ fun ArtistPageScreen(
 ) {
     val profiles by app.artists.collectAsState()
     val walks by app.walks.collectAsState()
+    val here by app.location.location.collectAsState()
     LaunchedEffect(artistId) { app.loadArtist(artistId) }
 
     val profile = profiles[artistId]
@@ -64,7 +67,7 @@ fun ArtistPageScreen(
                         Spacer(Modifier.height(12.dp))
                         // The bio is Markdown source. Rendering it as plain text keeps every word
                         // intact; a full renderer can come later without changing the format.
-                        Text(stripMarkdown(bio), style = MaterialTheme.typography.bodyMedium)
+                        MarkdownBody(bio, color = MaterialTheme.colorScheme.onSurface)
                     } else if (profile == null) {
                         Spacer(Modifier.height(12.dp))
                         Text("Loading…", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
@@ -83,11 +86,17 @@ fun ArtistPageScreen(
                 val anywhere = mine.filter { it.portable == true }
                 if (geo.isNotEmpty()) {
                     item { GroupLabel("Geo-Locked") }
-                    items(geo, key = { it.id }) { ArtistWalkRow(it) { onOpenWalk(it) } }
+                    items(geo, key = { it.id }) { w ->
+                        // The artist's own page leaves the creator as plain text: linking it here
+                        // would just point back at the page you are already on.
+                        WalkRow(w, app, here, onOpen = { onOpenWalk(w) }, onArtist = null)
+                    }
                 }
                 if (anywhere.isNotEmpty()) {
                     item { GroupLabel("Listen From Anywhere") }
-                    items(anywhere, key = { it.id }) { ArtistWalkRow(it) { onOpenWalk(it) } }
+                    items(anywhere, key = { it.id }) { w ->
+                        WalkRow(w, app, here, onOpen = { onOpenWalk(w) }, onArtist = null)
+                    }
                 }
             }
             item { Spacer(Modifier.height(32.dp)) }
@@ -104,30 +113,3 @@ private fun GroupLabel(text: String) {
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
     )
 }
-
-@Composable
-private fun ArtistWalkRow(walk: com.brianellissound.songitude.data.RemoteWalk, onOpen: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(horizontal = 20.dp, vertical = 10.dp),
-        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-    ) {
-        AsyncImage(
-            model = walk.artUrl,
-            contentDescription = null,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)),
-        )
-        Spacer(Modifier.width(12.dp))
-        Text(walk.name, style = MaterialTheme.typography.titleSmall)
-    }
-}
-
-/** Strip the handful of Markdown markers the editor's bio field allows, so the text reads cleanly
- *  as prose rather than showing its own syntax. */
-private fun stripMarkdown(md: String): String = md
-    .replace(Regex("^#{1,6}\\s*", RegexOption.MULTILINE), "")
-    .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")
-    .replace(Regex("(?<!\\*)\\*(?!\\*)(.+?)(?<!\\*)\\*(?!\\*)"), "$1")
-    .replace(Regex("_(.+?)_"), "$1")
-    .replace(Regex("\\[(.+?)]\\((.+?)\\)"), "$1")
-    .trim()
