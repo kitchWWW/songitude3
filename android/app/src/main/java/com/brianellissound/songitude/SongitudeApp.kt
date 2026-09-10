@@ -3,6 +3,7 @@ package com.brianellissound.songitude
 import android.app.Application
 import com.brianellissound.songitude.audio.RenderEngine
 import com.brianellissound.songitude.location.SongitudeLocationManager
+import com.brianellissound.songitude.model.Experience
 import com.brianellissound.songitude.service.PlaybackService
 
 /**
@@ -18,13 +19,30 @@ class SongitudeApp : Application() {
     val engine: RenderEngine by lazy { RenderEngine(this) }
     val location: SongitudeLocationManager by lazy { SongitudeLocationManager(this) }
 
+    /**
+     * The walk currently loaded, as placed — held here rather than in the AppState ViewModel.
+     *
+     * Android will tear the Activity down while a walk plays with the screen off, and a ViewModel
+     * goes with it. Keeping the loaded walk only there meant coming back to a running foreground
+     * service, audio still playing, and a UI that believed nothing was loaded — so it opened the
+     * walks list instead of the map with its pause button. iOS never has this problem because its
+     * AppState lives as long as the app does.
+     *
+     * Cleared when the process dies, which is the right behaviour: a full quit should open on the
+     * selector, exactly as iOS does.
+     */
+    @Volatile
+    var loadedExperience: Experience? = null
+
     override fun onCreate() {
         super.onCreate()
         PlaybackService.createChannel(this)
         // Playback starting or stopping is what starts and stops the foreground service, wherever
         // the transport was driven from — the button, the notification, or a headphone unplug.
         engine.onRunningChanged = { running ->
-            if (running) PlaybackService.start(this) else PlaybackService.stop(this)
+            // Pausing tells the service rather than killing it, so its transport stays on the lock
+            // screen to resume from — the way iOS keeps its Now Playing entry at a rate of 0.
+            if (running) PlaybackService.start(this) else PlaybackService.pause(this)
         }
     }
 }

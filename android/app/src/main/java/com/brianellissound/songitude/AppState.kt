@@ -159,9 +159,12 @@ class AppState(app: Application) : AndroidViewModel(app) {
 
     init {
         _experiences.value = ExperienceLibrary.loadAll(ctx)
-        // No walk is chosen for the listener: the app opens on the walks selector rather than
-        // dropping them into an arbitrary bundled demo.
-        _current.value = null
+        // A walk still loaded from earlier in this process — the Activity was recreated while it
+        // played, most likely with the phone pocketed. Adopt it without touching the engine, which
+        // is still sounding it. With nothing loaded the app opens on the walks selector rather than
+        // dropping the listener into an arbitrary walk, matching iOS.
+        _current.value = (app as SongitudeApp).loadedExperience
+        authoredCurrent = _current.value
 
         location.onLocation = { coord -> ingestFix(coord) }
         engine.remoteToggle = { play ->
@@ -198,6 +201,12 @@ class AppState(app: Application) : AndroidViewModel(app) {
 
         refreshDownloadedIds()
         refreshCatalog()
+        location.primeFromCache()
+    }
+
+    /** Keep the process-lifetime copy in step, so an Activity restart finds the walk again. */
+    private fun rememberLoaded(exp: Experience?) {
+        (getApplication() as SongitudeApp).loadedExperience = exp
     }
 
     fun isDownloaded(id: String) = _downloadedIds.value.contains(id)
@@ -257,6 +266,7 @@ class AppState(app: Application) : AndroidViewModel(app) {
         // equal to the one already held — so an identical one-shot fix would never re-place it.
         val placed = anchoredIfPortable(exp)
         _current.value = placed
+        rememberLoaded(placed)
         _offset.value = CoordinateOffset.NONE
         engine.load(placed)              // stops current playback
         engine.setOffset(CoordinateOffset.NONE)
@@ -307,6 +317,7 @@ class AppState(app: Application) : AndroidViewModel(app) {
         val placed = anchoredIfPortable(authored)
         pendingRecenter = false
         _current.value = placed
+        rememberLoaded(placed)
         _placementVersion.value += 1
         engine.updateGeometry(placed)
         primeEngineWithCurrentLocation()
@@ -442,6 +453,7 @@ class AppState(app: Application) : AndroidViewModel(app) {
             _showFarAwayCard.value = false
         }
         _current.value = anchoredIfPortable(exp)
+        rememberLoaded(_current.value)
         _offset.value = CoordinateOffset.NONE
         engine.setOffset(CoordinateOffset.NONE)
         location.stop(); stopSlew()
@@ -455,6 +467,7 @@ class AppState(app: Application) : AndroidViewModel(app) {
         if (activeWalkRequest == id) activeWalkRequest = null
         if (wasCurrent) {
             _current.value = null
+            rememberLoaded(null)
             _showIntroCard.value = false
             _showFarAwayCard.value = false
             engine.stop(); location.stop(); stopSlew()
@@ -500,6 +513,7 @@ class AppState(app: Application) : AndroidViewModel(app) {
         engine.setOffset(CoordinateOffset.NONE)
         _experiences.value = ExperienceLibrary.loadAll(ctx)
         _current.value = null
+        rememberLoaded(null)
         _showIntroCard.value = false
         _showFarAwayCard.value = false
         _showPermissionDeniedAlert.value = false
@@ -525,6 +539,9 @@ class AppState(app: Application) : AndroidViewModel(app) {
 
     fun onPermissionResult() {
         location.refreshAuthorization()
+        // The provider usually already knows where the phone is; take that now so the first press
+        // of play has a position to work from.
+        location.primeFromCache()
     }
 
     // MARK: - Playback
@@ -538,10 +555,26 @@ class AppState(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Evaluate the whole walk against wherever the listener is standing, right now.
+     *
+     * Pressing play must sound the areas underfoot immediately rather than waiting for the location
+     * stream to produce its first update — that wait was silence, and it was indistinguishable from
+     * the app being broken. So this primes from the best position already known, and separately asks
+     * for a fresh fix, re-evaluating again when it lands.
+     */
     private fun primeEngineWithCurrentLocation() {
-        val here = location.location.value ?: location.lastKnownLocation ?: return
-        virtualCoord = here          // slew starts from here on the next fix
-        engine.updateLocation(here)
+        val here = location.location.value ?: location.lastKnownLocation
+        if (here != null) {
+            virtualCoord = here      // slew starts from here on the next fix
+            engine.updateLocation(here)
+        }
+        // A fix straight from the hardware, however stale the cached one was. Adopted directly
+        // rather than slewed: this is the listener saying "start here", not a position drifting.
+        location.requestImmediateFix { fresh ->
+            virtualCoord = fresh
+            engine.updateLocation(fresh)
+        }
     }
 
     // MARK: - GPS slewing

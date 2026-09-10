@@ -8,6 +8,7 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
+import android.media.AudioRouting
 import android.media.AudioTrack
 import android.os.Handler
 import android.os.Looper
@@ -25,6 +26,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlin.math.max
@@ -100,10 +102,26 @@ class RenderEngine(private val context: Context) {
     private var loadToken = 0
     private var lastCoord: LatLngD? = null
 
+    /** Where decoded PCM is kept for the loaded walk. Cleared with the walk, so a deleted walk
+     *  doesn't leave hundreds of megabytes of raw audio behind. */
+    private fun pcmDir(): File = File(File(context.cacheDir, "pcm"), experience?.id ?: "none")
+
     // Residency thresholds (metres from a region's boundary). Hysteresis: decode within preload,
     // keep until beyond evict — so pacing back and forth over a line doesn't thrash.
     private val preloadDistance = 300.0
     private val evictDistance = 600.0
+
+    /** Ceiling on decoded audio held at once, in native memory.
+     *
+     *  iOS needs no such limit — it decodes what proximity says is near and the device copes. A
+     *  walk like Magic Square is 148 MB of MP3 across twelve areas, and a phone will not hold all of
+     *  that decoded. Distance already decides *what* to keep; this decides *how much*, dropping the
+     *  furthest clips first so what is underfoot always wins. */
+    // Mapped rather than heap-resident, so this is a bound on address space and page cache rather
+    // than on the runtime's 256 MB ceiling. Generous, and the kernel evicts pages under pressure
+    // regardless.
+    private val pcmBudgetBytes = 700L * 1024 * 1024
+    private var pcmBytes = 0L
 
     // MARK: - Synced loops
 
@@ -125,8 +143,10 @@ class RenderEngine(private val context: Context) {
      *  under [lock]. */
     private class Voice {
         var buffer: PcmBuffer? = null
-        /** Playhead in frames. We own the clock, so this is simply exact. */
-        var pos: Long = 0
+        /** Playhead in the clip's *own* frames. Fractional because a clip may run at a different
+         *  rate from the output; the step per output frame is fixed, so two synced clips stay in
+         *  the same relationship forever. */
+        var pos: Double = 0.0
         var loop = false
         var volume = 0f
         /** Volume the current ramp is heading to — this is what drives the map highlight. */
@@ -188,16 +208,27 @@ class RenderEngine(private val context: Context) {
     private var focusRequest: AudioFocusRequest? = null
     private var wasInterrupted = false
 
+    /** Master gain applied to the finished mix while another app is ducking us. */
+    @Volatile
+    private var focusDuck = 1f
+
     private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
         main.post {
             when (change) {
                 // A call or another app taking the route: iOS gets an interruption notification and
                 // does the same thing — tear down, remember we were playing, come back after.
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
-                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                // A call or Siri: iOS gets an interruption and tears down, remembering it was
+                // playing. Same here.
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
                     if (_isRunning.value) { wasInterrupted = true; teardownAudio() }
                 }
+                // A notification chirp. Android offers this as its own case; iOS simply never
+                // interrupts for one, and the walk plays on. Ducking under it rather than pausing is
+                // what keeps the two behaving alike — a soundwalk stopping dead because a message
+                // arrived would be its own kind of broken.
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> focusDuck = 0.25f
                 AudioManager.AUDIOFOCUS_GAIN -> {
+                    focusDuck = 1f
                     if (wasInterrupted) {
                         wasInterrupted = false
                         if (!bringUpAudio()) setRunning(false)
@@ -223,6 +254,36 @@ class RenderEngine(private val context: Context) {
     }
     private var noisyRegistered = false
 
+    /** Hardware route changed underneath us — Bluetooth connecting, a dock, a USB DAC. The track was
+     *  built for the old device and may now be rendering nowhere. iOS rebuilds its graph on
+     *  AVAudioEngineConfigurationChange for exactly this; this is the same move. */
+    private val routingListener = AudioRouting.OnRoutingChangedListener {
+        main.post {
+            if (!_isRunning.value || wasInterrupted) return@post
+            rebuildGraph()
+        }
+    }
+
+    /** Tear the output down and bring it back with playback intact. */
+    private fun rebuildGraph() {
+        teardownAudio()
+        if (!bringUpAudio()) setRunning(false)
+    }
+
+    /**
+     * Make the transport honest when the app comes back to the foreground.
+     *
+     * If the mixer died while we were away — the track was reclaimed, the process was frozen
+     * part-way through a teardown — `isRunning` would otherwise keep claiming to play over silence,
+     * and the button would read "pause" and do nothing. Ported from iOS's handleForeground.
+     */
+    fun reconcileOnForeground() {
+        main.post {
+            if (!_isRunning.value || wasInterrupted) return@post
+            if (track == null || !mixing.get()) handleRemoteTransport(false)
+        }
+    }
+
     // MARK: - Loading
 
     /** Swap in an experience. Audio is NOT preloaded — clips decode on demand as the listener nears
@@ -235,6 +296,7 @@ class RenderEngine(private val context: Context) {
         loadToken++
         synchronized(lock) {
             bufferCache.clear(); crossfadeCache.clear(); loadingFiles.clear()
+            pcmBytes = 0
             runtimes.clear()
             shapes.forEach { runtimes[it.id] = Runtime() }
         }
@@ -347,6 +409,7 @@ class RenderEngine(private val context: Context) {
         }
         synchronized(lock) { masterFrame = 0 }
         track = t
+        t.addOnRoutingChangedListener(routingListener, main)
         t.play()
         startMixThread()
         ensureSyncedLoops()
@@ -367,11 +430,15 @@ class RenderEngine(private val context: Context) {
             bufferCache.clear()
             crossfadeCache.clear()
             loadingFiles.clear()
+            pcmBytes = 0
         }
         soloActive = false
         duckMoved.clear()
         _soundingShapeIds.value = emptySet()
-        try { track?.pause(); track?.flush(); track?.release() } catch (_: Throwable) {}
+        try {
+            track?.removeOnRoutingChangedListener(routingListener)
+            track?.pause(); track?.flush(); track?.release()
+        } catch (_: Throwable) {}
         track = null
         loadToken++              // invalidate any in-flight decodes
         syncedStarted = false
@@ -398,6 +465,8 @@ class RenderEngine(private val context: Context) {
                     exitVoice?.let { mixVoice(it, block, blockStart, blockFrames, finished, null) }
                     masterFrame += blockFrames
                 }
+                val duck = focusDuck
+                if (duck != 1f) for (j in block.indices) block[j] *= duck
                 // Callbacks run on the main thread and may mutate the graph, so never inside the lock.
                 if (finished.isNotEmpty()) main.post { finished.forEach { it() } }
                 val out = track ?: break
@@ -433,8 +502,11 @@ class RenderEngine(private val context: Context) {
         var i = max(0, (v.startAtFrame - blockStart).toInt())
         if (i >= n) return
         val ch = outChannels
-        val samples = buf.samples
         val frames = buf.frames
+        // Clips keep their own sample rate, so each voice steps through its source by a fixed
+        // amount per output frame. Fixed is the important word: it is what keeps two synced clips
+        // in the same relationship however long the walk runs.
+        val step = buf.sampleRate.toDouble() / outRate
 
         while (i < n) {
             if (v.rampRemaining > 0) {
@@ -447,7 +519,7 @@ class RenderEngine(private val context: Context) {
             }
             if (v.pos >= frames) {
                 if (v.loop) {
-                    v.pos = 0
+                    v.pos -= frames        // carry the fraction, so a loop never drifts
                 } else {
                     v.ended = true
                     val cb = v.onFinish
@@ -455,12 +527,18 @@ class RenderEngine(private val context: Context) {
                     return
                 }
             }
-            val p = v.pos.toInt() * ch
             val vol = v.volume
             if (vol != 0f) {
-                for (c in 0 until ch) block[i * ch + c] += samples[p + c] * vol
+                val f0 = v.pos.toInt()
+                val frac = (v.pos - f0).toFloat()
+                val f1 = if (f0 + 1 < frames) f0 + 1 else if (v.loop) 0 else f0
+                for (c in 0 until ch) {
+                    val a = buf.sample(f0, c)
+                    val b = buf.sample(f1, c)
+                    block[i * ch + c] += (a + (b - a) * frac) * vol
+                }
             }
-            v.pos++
+            v.pos += step
             i++
         }
     }
@@ -555,11 +633,36 @@ class RenderEngine(private val context: Context) {
             if (cached == null) {
                 if (!loadingFiles.contains(file) && d <= preloadDistance) loadFile(file)
             } else if (!synced.contains(file) && d > evictDistance && !fileInUse(file)) {
-                synchronized(lock) {
-                    bufferCache.remove(file)
-                    shapes.filter { it.audioFile == file }.forEach { crossfadeCache.remove(it.id) }
-                }
+                evict(file)
             }
+        }
+    }
+
+    /** Drop one decoded clip and anything baked from it. */
+    private fun evict(file: String) {
+        synchronized(lock) {
+            bufferCache.remove(file)?.let { pcmBytes -= it.byteCount }
+            shapes.filter { it.audioFile == file }.forEach { s ->
+                crossfadeCache.remove(s.id)?.let { pcmBytes -= it.byteCount }
+            }
+        }
+        // The decoded file is deliberately left on disk: walking back into the area maps it again
+        // instead of decoding a second time, and the kernel has already stopped paying for the
+        // pages we no longer touch.
+    }
+
+    /** Bring memory back under the ceiling by dropping the furthest clips that nothing is using.
+     *  Synced loops are never dropped: they have to stay resident to hold sync. */
+    private fun enforcePcmBudget() {
+        if (pcmBytes <= pcmBudgetBytes) return
+        val here = lastCoord ?: return
+        val synced = syncedFileSet()
+        val candidates = synchronized(lock) { bufferCache.keys.toList() }
+            .filter { it !in synced && !fileInUse(it) }
+            .sortedByDescending { fileDistance(it, here) }
+        for (file in candidates) {
+            if (pcmBytes <= pcmBudgetBytes) return
+            evict(file)
         }
     }
 
@@ -569,12 +672,16 @@ class RenderEngine(private val context: Context) {
         val token = loadToken
         val target = exp.audioFile(file)
         io.launch {
-            val buf = AudioDecoder.decode(target, outRate, outChannels)
+            val buf = AudioDecoder.decode(target, pcmDir())
             main.post {
                 if (token != loadToken) return@post
                 loadingFiles.remove(file)
                 if (buf == null) return@post
-                synchronized(lock) { bufferCache[file] = buf }
+                synchronized(lock) {
+                    bufferCache.put(file, buf)?.let { pcmBytes -= it.byteCount }
+                    pcmBytes += buf.byteCount
+                }
+                enforcePcmBudget()
                 startSyncedLoopsIfReady()
                 // Start a queued dialogue that was waiting on this clip to decode.
                 val p = dialoguePlaying
@@ -737,7 +844,10 @@ class RenderEngine(private val context: Context) {
 
     private fun crossfadeBufferFor(shape: SoundShape, raw: PcmBuffer): PcmBuffer =
         synchronized(lock) {
-            crossfadeCache.getOrPut(shape.id) { raw.bakedCrossfade(shape.crossfade) }
+            crossfadeCache.getOrPut(shape.id) {
+                raw.bakedCrossfade(shape.crossfade, File(pcmDir(), "${'$'}{shape.id}.xf.pcm"))
+                    .also { pcmBytes += it.byteCount }
+            }
         }
 
     /** Track proximity gain as the listener moves within a falloff circle (no-op for plain loops). */
@@ -799,34 +909,37 @@ class RenderEngine(private val context: Context) {
      */
     fun skip(delta: Double) {
         if (!_isRunning.value || outroActive || delta == 0.0) return
-        val deltaFrames = (delta * outRate).toLong()
+        val shiftOut = (delta * outRate).toLong()
 
         synchronized(lock) {
-            syncedShiftFrames += deltaFrames
+            syncedShiftFrames += shiftOut
             val epoch = syncedEpochFrame
             for ((id, v) in voices) {
                 val shape = shapes.firstOrNull { it.id == id } ?: continue
                 val buf = v.buffer ?: continue
                 if (buf.frames <= 0) continue
+                // The move is expressed in this clip's own frames, since each keeps its own rate.
+                val moveFrames = delta * buf.sampleRate
                 when (shape.mode) {
                     PlaybackMode.SYNCED_LOOP -> {
                         // Position comes from the shared launch instant rather than this voice's own
                         // playhead, so every synced clip lands on the same offset and they stay
                         // aligned with each other rather than drifting apart by the cost of this loop.
                         if (epoch != null && masterFrame > epoch) {
-                            val elapsed = (masterFrame - epoch) + syncedShiftFrames
-                            var p = elapsed % buf.frames
+                            val elapsedOut = (masterFrame - epoch) + syncedShiftFrames
+                            val step = buf.sampleRate.toDouble() / outRate
+                            var p = (elapsedOut * step) % buf.frames
                             if (p < 0) p += buf.frames
                             v.pos = p
                         }
                     }
                     PlaybackMode.LOOP -> {
-                        var p = (v.pos + deltaFrames) % buf.frames
+                        var p = (v.pos + moveFrames) % buf.frames
                         if (p < 0) p += buf.frames    // a rewind past the top comes round to the tail
                         v.pos = p
                     }
                     PlaybackMode.ONESHOT, PlaybackMode.DIALOGUE -> {
-                        val p = v.pos + deltaFrames
+                        val p = v.pos + moveFrames
                         if (p >= buf.frames) {
                             // Past the end of a play-once clip is the same as having heard it through.
                             v.ended = true
@@ -834,7 +947,7 @@ class RenderEngine(private val context: Context) {
                             v.onFinish = null
                             if (cb != null) main.post(cb)
                         } else {
-                            v.pos = max(0L, p)        // before the top ⇒ from the top
+                            v.pos = max(0.0, p)       // before the top ⇒ from the top
                         }
                     }
                 }
@@ -843,13 +956,13 @@ class RenderEngine(private val context: Context) {
             introVoice?.let { v ->
                 val buf = v.buffer
                 if (buf != null && buf.frames > 0) {
-                    val p = v.pos + deltaFrames
+                    val p = v.pos + delta * buf.sampleRate
                     if (p >= buf.frames) {
                         v.ended = true
                         val cb = v.onFinish
                         v.onFinish = null
                         if (cb != null) main.post(cb)
-                    } else v.pos = max(0L, p)
+                    } else v.pos = max(0.0, p)
                 }
             }
         }
@@ -941,7 +1054,7 @@ class RenderEngine(private val context: Context) {
         val token = loadToken
         val target = exp.audioFile(file)
         io.launch {
-            val buf = AudioDecoder.decode(target, outRate, outChannels)
+            val buf = AudioDecoder.decode(target, pcmDir())
             main.post {
                 if (token != loadToken || buf == null) { onFinish(); return@post }
                 synchronized(lock) { bufferCache[file] = buf }

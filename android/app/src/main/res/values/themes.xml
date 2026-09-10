@@ -1,3 +1,10 @@
 <resources>
-    <style name="Theme.Songitude" parent="android:Theme.Material.NoActionBar" />
+    <!-- The window background is what the system paints before Compose draws its first frame. Left
+         at the platform default it flashed white ahead of the splash animation, which begins on
+         black; this makes the handover invisible. -->
+    <style name="Theme.Songitude" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/launch_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
 </resources>

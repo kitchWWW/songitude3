@@ -2,6 +2,7 @@ package com.brianellissound.songitude.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -17,9 +18,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -29,6 +30,7 @@ import com.brianellissound.songitude.R
 import com.brianellissound.songitude.audio.RenderEngine
 import com.brianellissound.songitude.model.CoordinateOffset
 import com.brianellissound.songitude.model.DialogueColors
+import com.brianellissound.songitude.location.SongitudeLocationManager
 import com.brianellissound.songitude.model.LatLngD
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
@@ -62,6 +64,9 @@ fun MapScreen(
     val placement by app.placementVersion.collectAsState()
     val appearance by app.appearance.collectAsState()
     val here by app.location.location.collectAsState()
+    val auth by app.location.authorization.collectAsState()
+    val locationAuthorized = auth == SongitudeLocationManager.Authorization.WHEN_IN_USE ||
+        auth == SongitudeLocationManager.Authorization.ALWAYS
 
     val dark = isDarkTheme(appearance)
     val context = LocalContext.current
@@ -86,7 +91,10 @@ fun MapScreen(
             modifier = Modifier.fillMaxSize(),
             cameraPositionState = cameraPositionState,
             properties = MapProperties(
-                isMyLocationEnabled = app.location.isAuthorized,
+                // Derived from the observed authorization, not a plain getter: read directly, the
+                // map kept whatever value happened to be true at first composition, so granting the
+                // permission afterwards never brought the blue dot back.
+                isMyLocationEnabled = locationAuthorized,
                 mapStyleOptions = MapStyleOptions.loadRawResourceStyle(
                     context,
                     if (dark) R.raw.map_style_dark else R.raw.map_style_light,
@@ -240,19 +248,34 @@ private fun GlassCircleButton(onClick: () -> Unit, content: @Composable () -> Un
  */
 @Composable
 private fun SkipButton(delta: Double, live: Boolean, onSkip: (Double) -> Unit) {
+    val tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (live) 1f else 0.35f)
     Surface(
         shape = CircleShape,
         color = MaterialTheme.colorScheme.surface.copy(alpha = if (live) 0.85f else 0.35f),
         onClick = { if (live) onSkip(delta) },
-        modifier = Modifier.size(56.dp),
+        modifier = Modifier.size(60.dp),
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            // One icon mirrored, so back and forward read as a pair.
+            // Mirrored left-to-right, not rotated: a 180° rotation turns the arrow upside down
+            // rather than reversing it, which is what made the forward button read as broken.
+            //
+            // The arrow is drawn large enough that its loop has room for the interval inside it,
+            // the way gobackward.15 carries the number on iOS.
             Icon(
                 Icons.Filled.Replay,
                 contentDescription = if (delta < 0) "Back 15 seconds" else "Forward 15 seconds",
-                modifier = if (delta < 0) Modifier.size(24.dp) else Modifier.size(24.dp).rotate(180f),
-                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = if (live) 1f else 0.35f),
+                modifier = Modifier
+                    .size(40.dp)
+                    .graphicsLayer { if (delta > 0) scaleX = -1f },
+                tint = tint,
+            )
+            Text(
+                "15",
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                color = tint,
+                // The glyph's loop sits a little below the box's centre, so the number follows it.
+                modifier = Modifier.offset(y = 2.dp),
             )
         }
     }

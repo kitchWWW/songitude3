@@ -34,6 +34,16 @@ class SongitudeLocationManager(private val context: Context) : SensorEventListen
 
     enum class Authorization { NOT_DETERMINED, DENIED, WHEN_IN_USE, ALWAYS }
 
+    companion object {
+        /** Once a second. Enough to catch a walker crossing a boundary — at a brisk pace that is
+         *  under two metres — without paying for high-accuracy fixes twice as often. What matters
+         *  far more than the rate is that updates are time-based at all: the distance filter this
+         *  replaced delivered nothing whatsoever while the listener stood still. */
+        private const val UPDATE_INTERVAL_MS = 1000L
+        /** Accept anything the provider happens to offer sooner. */
+        private const val FASTEST_INTERVAL_MS = 500L
+    }
+
     private val _authorization = MutableStateFlow(currentAuthorization())
     val authorization: StateFlow<Authorization> = _authorization.asStateFlow()
 
@@ -68,6 +78,7 @@ class SongitudeLocationManager(private val context: Context) : SensorEventListen
 
     private fun deliver(loc: Location) {
         val coord = LatLngD(loc.latitude, loc.longitude)
+        cachedFix = coord
         _location.value = coord
         if (oneShotOnly && !wantsUpdates) { oneShotOnly = false; return }
         onLocation?.invoke(coord)
@@ -91,9 +102,46 @@ class SongitudeLocationManager(private val context: Context) : SensorEventListen
     val isAuthorized: Boolean
         get() = _authorization.value == Authorization.WHEN_IN_USE || _authorization.value == Authorization.ALWAYS
 
-    /** Best guess at where we are WITHOUT starting updates. Used to sort the catalog nearest-first;
-     *  never triggers a new request. */
-    val lastKnownLocation: LatLngD? get() = _location.value
+    /** Best guess at where we are WITHOUT starting updates. Used to sort the catalog nearest-first
+     *  and to prime the engine the moment play is pressed; never triggers a new request.
+     *
+     *  [cachedFix] mirrors iOS's `manager.location`: the system already knows roughly where the
+     *  phone is, and refusing to use that meant a fresh launch had nothing to prime with. */
+    val lastKnownLocation: LatLngD? get() = _location.value ?: cachedFix
+
+    private var cachedFix: LatLngD? = null
+
+    /** Pull the provider's most recent fix without asking for a new one. Safe to call often. */
+    @Suppress("MissingPermission")
+    fun primeFromCache() {
+        if (!isAuthorized) return
+        try {
+            client.lastLocation.addOnSuccessListener { loc ->
+                if (loc == null) return@addOnSuccessListener
+                cachedFix = LatLngD(loc.latitude, loc.longitude)
+                if (_location.value == null) deliver(loc)
+            }
+        } catch (_: SecurityException) {
+        }
+    }
+
+    /** One fix, as fast as the hardware can manage, handed to [onFix]. Used when playback starts so
+     *  the engine hears where the listener is standing rather than waiting on the update stream. */
+    @Suppress("MissingPermission")
+    fun requestImmediateFix(onFix: (LatLngD) -> Unit) {
+        if (!isAuthorized) return
+        try {
+            client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                .addOnSuccessListener { loc ->
+                    if (loc == null) return@addOnSuccessListener
+                    val c = LatLngD(loc.latitude, loc.longitude)
+                    cachedFix = c
+                    deliver(loc)
+                    onFix(c)
+                }
+        } catch (_: SecurityException) {
+        }
+    }
 
     /** One fix, then nothing. Used when the walks list opens so it can be ordered by distance even
      *  though playback isn't running. */
@@ -117,15 +165,26 @@ class SongitudeLocationManager(private val context: Context) : SensorEventListen
     fun start() {
         wantsUpdates = true
         if (!isAuthorized) return
-        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L)
-            .setMinUpdateIntervalMillis(500L)
-            // 3 m matches the iOS distanceFilter. A sound walk turns on where someone is standing,
-            // so a coarser filter would let them walk into an area without it sounding.
-            .setMinUpdateDistanceMeters(3f)
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, UPDATE_INTERVAL_MS)
+            .setMinUpdateIntervalMillis(FASTEST_INTERVAL_MS)
+            // Deliberately NO distance filter.
+            //
+            // This was ported from the iOS `distanceFilter = 3` and it was wrong here. The fused
+            // provider takes it literally: below the threshold it delivers *nothing*, so a listener
+            // standing still — which is most of a soundwalk — got no callbacks, and the engine never
+            // re-evaluated which areas they were inside. Time-based updates are what the state
+            // machine actually needs; it is cheap to re-test containment against a position that
+            // has barely moved, and ruinous to not test at all.
+            .setMinUpdateDistanceMeters(0f)
             .setWaitForAccurateLocation(false)
             .build()
         try {
             client.requestLocationUpdates(request, callback, Looper.getMainLooper())
+            // Don't wait out the first interval: take the provider's cached fix immediately, so
+            // pressing play sounds the areas underfoot straight away.
+            primeFromCache()
+            client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                .addOnSuccessListener { loc -> if (loc != null) deliver(loc) }
         } catch (_: SecurityException) {
         }
         startHeading(oneShot = false)

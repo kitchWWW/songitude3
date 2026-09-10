@@ -8,7 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
-import com.brianellissound.songitude.ui.LogoTile
+import com.brianellissound.songitude.ui.SongitudeMark
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -48,7 +48,15 @@ private fun OnboardingStep(
                         .size(100.dp)
                         .onGloballyPositioned { onLogoBounds(it.boundsInRoot()) }
                 ) {
-                    if (!hidesLogo) LogoTile(size = 100.dp)
+                    // The mark alone, no icon tile: the edge of a home-screen icon has no business
+                    // on a screen that isn't the home screen. It takes the theme's own colour, so it
+                    // reads on either background.
+                    if (!hidesLogo) {
+                        SongitudeMark(
+                            Modifier.size(100.dp),
+                            stroke = MaterialTheme.colorScheme.onBackground,
+                        )
+                    }
                 }
                 Spacer(Modifier.height(24.dp))
             }

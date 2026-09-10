@@ -7,6 +7,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -24,6 +26,7 @@ import kotlinx.coroutines.launch
 /** Where the launch animation has got to. */
 enum class SplashPhase { WAVES, FLYING, DONE }
 
+/** The mark's own size on the splash. The onboarding slot is 100dp, so it halves as it flies. */
 private const val SPLASH_TILE_DP = 200f
 
 /** Everything after the opening hold runs this many times faster than its written timings. */
@@ -59,7 +62,12 @@ fun SplashOverlay(
     val dx = remember(resetToken) { Animatable(0f) }
     val dy = remember(resetToken) { Animatable(0f) }
     val backdrop = remember(resetToken) { Animatable(1f) }
-    val tileAlpha = remember(resetToken) { Animatable(0f) }
+    // The mark is white against the splash's dark wash and has to become the theme's own colour by
+    // the time it lands on the onboarding screen, which may well be white itself.
+    val landed = MaterialTheme.colorScheme.onBackground
+    // Qualified: the colour overload lives in androidx.compose.animation, while the Float one
+    // imported above is from animation.core.
+    val markColor = remember(resetToken) { androidx.compose.animation.Animatable(Color.White) }
 
     val latestTarget by rememberUpdatedState(logoTarget)
     val scope = rememberCoroutineScope()
@@ -90,7 +98,7 @@ fun SplashOverlay(
             // Fully damped: overshooting the landing spot reads as a bounce, not a hand-off.
             val fly = spring<Float>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 220f)
             scope.launch { backdrop.animateTo(0f, tween(beat(0.5).toInt())) }
-            scope.launch { tileAlpha.animateTo(1f, tween(beat(0.35).toInt())) }
+            scope.launch { markColor.animateTo(landed, tween(beat(0.5).toInt())) }
             scope.launch { scale.animateTo(target.width / tilePx, fly) }
             scope.launch { dx.animateTo(target.center.x - fromCx, fly) }
             scope.launch { dy.animateTo(target.center.y - fromCy, fly) }
@@ -126,10 +134,10 @@ fun SplashOverlay(
                     translationY = dy.value
                 },
         ) {
-            LogoTile(
-                size = SPLASH_TILE_DP.dp,
+            SongitudeMark(
+                Modifier.size(SPLASH_TILE_DP.dp),
                 waveOpacity = { i -> waveOpacity(i, pulse) },
-                tileOpacity = tileAlpha.value,
+                stroke = markColor.value,
             )
         }
     }

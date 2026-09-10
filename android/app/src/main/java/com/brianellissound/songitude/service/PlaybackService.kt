@@ -41,8 +41,6 @@ class PlaybackService : Service() {
                 override fun onPlay() { engine.handleRemoteTransport(true) }
                 override fun onPause() { engine.handleRemoteTransport(false) }
                 override fun onStop() { engine.handleRemoteTransport(false) }
-                override fun onSkipToNext() { engine.skip(com.brianellissound.songitude.audio.RenderEngine.SKIP_INTERVAL_SECONDS) }
-                override fun onSkipToPrevious() { engine.skip(-com.brianellissound.songitude.audio.RenderEngine.SKIP_INTERVAL_SECONDS) }
             })
             isActive = true
         }
@@ -54,6 +52,8 @@ class PlaybackService : Service() {
             ACTION_TOGGLE -> app.engine.handleRemoteTransport(null)
             ACTION_STOP -> {
                 app.engine.handleRemoteTransport(false)
+                (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                    .cancel(NOTIFICATION_ID)
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -62,20 +62,34 @@ class PlaybackService : Service() {
         val running = app.engine.isRunning.value
         val notification = buildNotification(running)
 
-        val types = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-        } else 0
-        ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, types)
+        if (running) {
+            val types = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            } else 0
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, types)
+        } else {
+            // Paused: stop being a foreground service — nothing is playing and nothing needs the
+            // process kept alive — but leave the notification standing, detached, so the transport
+            // is still there to resume from.
+            //
+            // Tearing it down instead was a real difference from iOS: pausing from the lock screen
+            // removed the only control that could start the walk again, so a pause was effectively
+            // a stop. iOS keeps its Now Playing entry with a rate of 0 for the same reason.
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_DETACH)
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .notify(NOTIFICATION_ID, notification)
+        }
 
         // Keep the transport state honest so the lock screen shows the right control.
         session.setPlaybackState(
             PlaybackStateCompat.Builder()
+                // Play, pause and stop only. A soundwalk is not a seekable medium and has no next
+                // track; iOS disables exactly these commands, and offering them here would put
+                // controls on the lock screen that the walk cannot honour.
                 .setActions(
                     PlaybackStateCompat.ACTION_PLAY or PlaybackStateCompat.ACTION_PAUSE or
-                        PlaybackStateCompat.ACTION_PLAY_PAUSE or PlaybackStateCompat.ACTION_STOP or
-                        PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
-                        PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
+                        PlaybackStateCompat.ACTION_PLAY_PAUSE or PlaybackStateCompat.ACTION_STOP
                 )
                 .setState(
                     if (running) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED,
@@ -126,6 +140,17 @@ class PlaybackService : Service() {
             .build()
     }
 
+    /**
+     * The app was swiped out of Recents. On iOS a force-quit tears the audio session down and the
+     * walk stops; swiping away is the same gesture, so it should mean the same thing rather than
+     * leaving a walk playing behind a notification nobody asked for.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        (application as SongitudeApp).engine.handleRemoteTransport(false)
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         session.isActive = false
         session.release()
@@ -137,6 +162,7 @@ class PlaybackService : Service() {
         private const val NOTIFICATION_ID = 1001
         const val ACTION_TOGGLE = "com.brianellissound.songitude.TOGGLE"
         const val ACTION_STOP = "com.brianellissound.songitude.STOP"
+        const val ACTION_REFRESH = "com.brianellissound.songitude.REFRESH"
 
         fun createChannel(context: Context) {
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -157,6 +183,14 @@ class PlaybackService : Service() {
             else context.startService(i)
         }
 
+        /** Playback paused. The service is told, rather than killed, so its notification survives
+         *  as something to resume from. */
+        fun pause(context: Context) {
+            val i = Intent(context, PlaybackService::class.java).setAction(ACTION_REFRESH)
+            runCatching { context.startService(i) }
+        }
+
+        /** The walk is done with entirely. */
         fun stop(context: Context) {
             context.stopService(Intent(context, PlaybackService::class.java))
         }

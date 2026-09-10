@@ -54,8 +54,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        val app = application as SongitudeApp
         // Permission can change in system Settings while we are away.
-        (application as SongitudeApp).location.refreshAuthorization()
+        app.location.refreshAuthorization()
+        // And the mixer may have died while we were gone; make the button tell the truth rather
+        // than reading "pause" over silence.
+        app.engine.reconcileOnForeground()
     }
 
     override fun onNewIntent(intent: Intent) {
