@@ -5,6 +5,9 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "raw")
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
 W, H = 1320, 2868                      # required 6.9" portrait size
+S = W / 1320                           # every fixed size below is in 1320-wide units; see android/play
+PHONE_W = 950                          # screen width inside the frame, in those units
+
 
 # Edit this table to change the set. `backdrop` is the screenshot blurred behind the phone — a
 # colourful map reads far better than a mostly-white list, so pale screens borrow one. `punch`
@@ -55,11 +58,11 @@ def backdrop(src_name, punch=1.9):
 
 def device_frame(shot):
     """An iPhone-ish body: brushed titanium rail, black bezel, rounded screen, side buttons."""
-    bezel, rail = 13, 11                       # black surround, then the metal edge
+    bezel, rail = int(13 * S), int(11 * S)     # black surround, then the metal edge
     pad = bezel + rail
     sw, sh = shot.size
     fw, fh = sw + pad * 2, sh + pad * 2
-    r_out, r_screen = 116, 88
+    r_out, r_screen = int(116 * S), int(88 * S)
 
     frame = Image.new("RGBA", (fw, fh), (0, 0, 0, 0))
 
@@ -111,33 +114,35 @@ def _wrap_one(draw, text, font, max_w):
     if cur: lines.append(cur)
     return lines
 
-def compose(src, headline, sub, bg_src, dest, punch=1.9):
+def compose(src, headline, sub, bg_src, dest, punch=1.9, crop=None):
     bg = backdrop(bg_src, punch)
     d = ImageDraw.Draw(bg)
-    f_head, f_sub = ImageFont.truetype(BOLD, 94), ImageFont.truetype(REG, 58)
+    f_head, f_sub = ImageFont.truetype(BOLD, int(94 * S)), ImageFont.truetype(REG, int(58 * S))
 
-    y = 140
-    for line in wrap(d, headline, f_head, W - 150):
+    y = int(140 * S)
+    for line in wrap(d, headline, f_head, W - int(150 * S)):
         d.text((W // 2 + 3, y + 3), line, font=f_head, fill=(0, 0, 0, 90), anchor="ma")
         d.text((W // 2, y), line, font=f_head, fill=(255, 255, 255), anchor="ma")
-        y += 108
-    y += 14
-    for line in wrap(d, sub, f_sub, W - 200):
+        y += int(108 * S)
+    y += int(14 * S)
+    for line in wrap(d, sub, f_sub, W - int(200 * S)):
         d.text((W // 2, y), line, font=f_sub, fill=(198, 204, 218), anchor="ma")
-        y += 72
+        y += int(72 * S)
 
     shot = Image.open(os.path.join(SRC, src)).convert("RGB")
-    inner_w = 950
+    if crop:                                               # (top, bottom) rows to drop
+        shot = shot.crop((0, crop[0], shot.width, shot.height - crop[1]))
+    inner_w = int(PHONE_W * S)
     shot = shot.resize((inner_w, int(shot.height * inner_w / shot.width)), Image.LANCZOS)
 
     frame, fw, fh = device_frame(shot)
-    fx, top = (W - fw) // 2, max(y + 90, 560)
+    fx, top = (W - fw) // 2, max(y + int(90 * S), int(560 * S))
 
     # soft drop shadow so the device lifts off the wash
     shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     ImageDraw.Draw(shadow).rounded_rectangle([fx + 12, top + 26, fx + fw + 12, top + fh + 26],
-                                             radius=110, fill=(0, 0, 0, 155))
-    bg = Image.alpha_composite(bg.convert("RGBA"), shadow.filter(ImageFilter.GaussianBlur(36)))
+                                             radius=int(110 * S), fill=(0, 0, 0, 155))
+    bg = Image.alpha_composite(bg.convert("RGBA"), shadow.filter(ImageFilter.GaussianBlur(int(36 * S))))
     bg.paste(frame, (fx, top), frame)
 
     bg.convert("RGB").save(dest, "PNG")
@@ -146,5 +151,5 @@ if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
     for i, s in enumerate(SHOTS, 1):
         compose(s["shot"], s["head"], s["sub"], s["backdrop"],
-                os.path.join(OUT, f"{i:02d}.png"), s.get("punch", 1.9))
+                os.path.join(OUT, f"{i:02d}.png"), s.get("punch", 1.9), s.get("crop"))
         print("wrote", f"{i:02d}.png")

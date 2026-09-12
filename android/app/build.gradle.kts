@@ -7,11 +7,17 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-// The Maps key is a per-machine secret: it lives in local.properties (git-ignored), never the repo.
-val mapsKey: String = Properties().apply {
-    val f = rootProject.file("local.properties")
+fun props(name: String) = Properties().apply {
+    val f = rootProject.file(name)
     if (f.exists()) f.inputStream().use { load(it) }
-}.getProperty("MAPS_API_KEY") ?: ""
+}
+
+// The Maps key is a per-machine secret: it lives in local.properties (git-ignored), never the repo.
+val mapsKey: String = props("local.properties").getProperty("MAPS_API_KEY") ?: ""
+
+// The Play upload key. keystore.properties is git-ignored and points at a .jks outside the repo;
+// when it is absent (a fresh clone, CI) the release build still assembles, just unsigned.
+val keystore = props("keystore.properties")
 
 android {
     namespace = "com.brianellissound.songitude"
@@ -26,10 +32,22 @@ android {
         manifestPlaceholders["MAPS_API_KEY"] = mapsKey
     }
 
+    signingConfigs {
+        if (keystore.getProperty("storeFile") != null) {
+            create("release") {
+                storeFile = file(keystore.getProperty("storeFile"))
+                storePassword = keystore.getProperty("storePassword")
+                keyAlias = keystore.getProperty("keyAlias")
+                keyPassword = keystore.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.findByName("release")
         }
     }
     compileOptions {

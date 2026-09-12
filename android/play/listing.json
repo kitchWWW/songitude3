@@ -1,0 +1,12 @@
+{
+  "package": "com.brianellissound.songitude",
+  "language": "en-US",
+  "title": "Songitude",
+  "shortDescription": "Soundwalks that change with where you stand. Walk, and let the music find you.",
+  "fullDescription": "Songitude turns a map into music.\n\nA soundwalk is a piece of music that lives in a place. Put on headphones, start walking, and the sound changes with where you stand — layers fading up as you enter a park, a voice waiting for you on a particular corner, a loop that follows you down a street.\n\nWALK AND LISTEN\nPress play and put your phone in your pocket. Songitude keeps playing with the screen off, so nothing comes between you and the walk. Areas fade in and out as you move through them, and the map shows you what is sounding around you. A small playback notification stays in your shade while a walk plays, with pause and skip at hand.\n\nLISTEN FROM ANYWHERE\nSome walks are tied to a specific place. Others travel with you: open one and it arranges itself around wherever you are standing, facing the way you are facing — so you can hear a composer's work in your own neighborhood, a park near you, or a field on the other side of the world.\n\nBUILT FOR HEADPHONES\nWalks are composed as looping layers, one-shot sounds and spoken passages that play once and wait their turn. Everything is downloaded before you set off, so you are not streaming while you walk.\n\nMADE BY ARTISTS\nEvery walk is composed by someone. Tap an artist's name to read about them and find the rest of their work.\n\nYOUR LOCATION STAYS YOURS\nLocation is used on your device, in the moment, to decide what you hear. It is never uploaded, never stored, and never shared. The app only asks for it while a walk is playing.",
+  "assets": {
+    "icon": "icon-512.png",
+    "featureGraphic": "feature-graphic.png",
+    "screenshots": "screenshots"
+  }
+}

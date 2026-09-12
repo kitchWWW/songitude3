@@ -21,7 +21,9 @@ docs/demo-videos/*.mp4
 
 # Android
 android/local.properties
+android/keystore.properties
 android/.gradle/
 android/build/
 android/app/build/
 android/.kotlin/
+__pycache__/

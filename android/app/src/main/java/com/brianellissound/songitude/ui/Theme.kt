@@ -5,7 +5,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import com.brianellissound.songitude.AppAppearance
 
 /** Songitude is black-and-white with one accent blue, matching the iOS rebrand. */
@@ -35,6 +38,18 @@ fun SongitudeTheme(appearance: AppAppearance, content: @Composable () -> Unit) {
         AppAppearance.SYSTEM -> isSystemInDarkTheme()
         AppAppearance.LIGHT -> false
         AppAppearance.DARK -> true
+    }
+    // The system bars are transparent and drawn over, so their icon colour has to follow the
+    // theme, not the window: left alone they stay white and vanish on the light screens.
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !dark
+                isAppearanceLightNavigationBars = !dark
+            }
+        }
     }
     MaterialTheme(colorScheme = if (dark) Dark else Light, content = content)
 }
