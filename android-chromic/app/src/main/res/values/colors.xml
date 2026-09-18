@@ -1,0 +1,7 @@
+<resources>
+    <!-- The wash's centre colour: behind the Android 12 splash icon, and under the launch bitmap. -->
+    <color name="launch_background">#F7D3A1</color>
+    <!-- The ordinary window background behind the app. The catalog screens paint the wash over it;
+         the map paints itself; this only ever shows for a frame in a transition. -->
+    <color name="app_background">#FFFFFF</color>
+</resources>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The launch window's first frame, for Android 11 and below where there is no system splash API:
+     the wash the landing opens on, with the app icon over it. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/launch_background" />
+    <item>
+        <bitmap android:src="@drawable/backdrop" android:gravity="fill" />
+    </item>
+    <item
+        android:drawable="@drawable/ic_launcher_foreground"
+        android:gravity="center"
+        android:width="216dp"
+        android:height="216dp" />
+</layer-list>

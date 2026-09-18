@@ -1,0 +1,59 @@
+F thSONGITUDE — ONBOARDING COPY
+===========================
+
+Edit the text under each label. Trim freely — the current text is too long.
+
+How this gets read back:
+  · Keep the LABELS and the "=== SCREEN ===" lines exactly as they are.
+  · A line starting with "- " becomes a bullet on screen.
+  · Leave a field empty to drop it entirely.
+  · Blank lines between paragraphs are kept.
+
+Both advance buttons must keep saying "Continue" — App Review rejected "Enable"
+on iOS under Guideline 5.1.1(iv) for dressing an advance button up as consent.
+
+
+=== SCREEN 1 — LOCATION ===
+
+TITLE:
+Songitude
+
+SUBTITLE:
+music on the map
+
+BODY:
+- your position changes the music you hear
+- Songitude only uses your location locally on this phone
+- It is never uploaded, stored or shared.
+
+FOOTNOTE:
+
+
+BUTTON:
+Continue
+
+SECONDARY:
+Not now
+
+
+=== SCREEN 2 — NOTIFICATIONS ===
+
+TITLE:
+One more thing
+
+SUBTITLE:
+So the music keeps playing.
+
+BODY:
+- For the best experience, you might want to lock your phone and put it in your pocket.
+- In order to keep giving you location-accurate audio, we need permission to run in the background.
+
+FOOTNOTE:
+We will never send you a notification. 
+Nothing is ever pushed at you — no alerts, no announcements, no reminders. 
+
+BUTTON:
+Continue
+
+SECONDARY:
+Not now

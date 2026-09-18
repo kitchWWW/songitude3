@@ -1,0 +1,16 @@
+<resources>
+    <!-- The app's ordinary theme. Its window background is a flat colour matching the Compose
+         theme, because this sits behind *every* window: anything else (a splash image, say) shows
+         through every transition, sheet and screen change. -->
+    <style name="Theme.Songitude" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/app_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
+    <!-- Launch only. The activity starts on this so the system's first frame is the picture the
+         animation opens on, then swaps to Theme.Songitude in onCreate before anything is drawn. -->
+    <style name="Theme.Songitude.Launch" parent="Theme.Songitude">
+        <item name="android:windowBackground">@drawable/launch_splash</item>
+    </style>
+</resources>
