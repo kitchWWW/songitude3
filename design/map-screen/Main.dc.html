@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,400;0,500;0,700;1,400&display=swap">
+  <style>
+    body { margin: 0; font-family: Roboto, "Helvetica Neue", Arial, sans-serif; }
+    a { color: #2e6bff; } a:hover { color: #1f52d1; }
+  </style>
+</helmet>
+<div style="position: relative; width: 384px; height: 832px; overflow: hidden; background: #f3f3f3 url(&quot;map-backdrop.jpg&quot;) 0 0 / 384px 832px no-repeat; font-family: Roboto, 'Helvetica Neue', Arial, sans-serif; color: #111111;">
+
+  <!-- Top bar -->
+  <div style="position: absolute; left: 16px; top: 44px; width: 44px; height: 44px; border-radius: 22px; background: rgba(255,255,255,0.85); box-shadow: 0 1px 3px rgba(0,0,0,0.12); display: flex; align-items: center; justify-content: center;">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#111111" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+  </div>
+
+  <div style="position: absolute; left: 115px; top: 44px; width: 154px; height: 44px; border-radius: 22px; background: rgba(255,255,255,0.85); box-shadow: 0 1px 3px rgba(0,0,0,0.12); display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 16px; box-sizing: border-box;">
+    <span style="font-size: 16px; font-weight: 500; line-height: 24px; letter-spacing: 0.15px; white-space: nowrap;">Magic Square</span>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="#111111"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"></path></svg>
+  </div>
+
+  <div style="position: absolute; left: 324px; top: 44px; width: 44px; height: 44px; border-radius: 22px; background: rgba(255,255,255,0.85); box-shadow: 0 1px 3px rgba(0,0,0,0.12); display: flex; align-items: center; justify-content: center;">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="#111111"><path d="M11.99 18.54l-7.37-5.73L3 14.07l9 7 9-7-1.63-1.27-7.38 5.74zM12 16l7.36-5.73L21 9l-9-7-9 7 1.63 1.27L12 16z"></path></svg>
+  </div>
+
+  <!-- Transport -->
+  <div style="position: absolute; left: 70px; top: 684px; width: 60px; height: 60px; border-radius: 30px; background: rgba(255,255,255,0.85); display: flex; align-items: center; justify-content: center;">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="#111111"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"></path></svg>
+    <span style="position: absolute; top: 27px; font-size: 9px; font-weight: 700; line-height: 10px;">15</span>
+  </div>
+
+  <div style="position: absolute; left: 150px; top: 672px; width: 84px; height: 84px; border-radius: 42px; background: #2e6bff; box-shadow: 0 6px 14px rgba(0,0,0,0.22); display: flex; align-items: center; justify-content: center;">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="#ffffff"><path d="M8 5v14l11-7z"></path></svg>
+  </div>
+
+  <div style="position: absolute; left: 254px; top: 684px; width: 60px; height: 60px; border-radius: 30px; background: rgba(255,255,255,0.85); display: flex; align-items: center; justify-content: center;">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="#111111" style="transform: scaleX(-1);"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"></path></svg>
+    <span style="position: absolute; top: 27px; font-size: 9px; font-weight: 700; line-height: 10px;">15</span>
+  </div>
+
+  <!-- Credit line -->
+  <div style="position: absolute; left: 0px; top: 762px; width: 384px; height: 18px; text-align: center; font-size: 12px; font-style: italic; line-height: 18px; color: #111111;">Double Half by Brian Ellis Sound</div>
+
+</div>
+</x-dc>
+</body>
+</html>

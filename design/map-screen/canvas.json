@@ -1,0 +1,9 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "x": 0, "y": 0, "w": 384, "h": 832, "title": "Map screen · Samsung A16 (384 × 832 dp)" }
+  ],
+  "annotations": [
+    { "id": "how-to-read", "x": 480, "y": 0, "w": 300, "text": "Drag anything to move it; pull a corner to resize. The frame is the phone in dp — status bar 0–36, nav bar 784–832. Save when it looks right and I will read the positions back into the app." }
+  ],
+  "launch": { "view": "canvas" }
+}
