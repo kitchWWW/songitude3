@@ -243,8 +243,20 @@ final class ArtworkCache: ObservableObject {
 
     func image(for url: String) -> UIImage? { memory.object(forKey: url as NSString) }
 
+    /// URLs refetched this session. A cached image is shown at once and revalidated once.
+    private var refreshed: Set<String> = []
+
     func load(_ url: String) {
-        guard image(for: url) == nil, !inFlight.contains(url), let u = URL(string: url) else { return }
+        guard let u = URL(string: url) else { return }
+        // Chromic: cache-then-seed. The bytes are on disk (last fetch) or in the app (seed), so the
+        // card has its picture on its first frame; the network below only ever makes it newer.
+        if image(for: url) == nil, let data = ContentStore.cached(u),
+           let img = Self.thumbnail(from: data, maxPixel: 1200) {
+            let bytes = Int(img.size.width * img.size.height * img.scale * img.scale * 4)
+            memory.setObject(img, forKey: url as NSString, cost: bytes)
+            generation &+= 1
+        }
+        guard !refreshed.contains(url), !inFlight.contains(url) else { return }
         inFlight.insert(url)
         session.dataTask(with: u) { [weak self] data, response, _ in
             // A non-2xx reply still carries a body — S3 answers with an XML error document — so
@@ -257,10 +269,14 @@ final class ArtworkCache: ObservableObject {
             // Chromic draws artwork 360pt wide on Home and edge to edge on the walk page, so the
             // thumbnail has to be sized for that, not for Songitude's 54pt row.
             let image = (ok ? data : nil).flatMap { Self.thumbnail(from: $0, maxPixel: 1200) }
+            if image != nil, let data { ContentStore.store(data, for: u) }
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.inFlight.remove(url)
+                if image != nil { self.refreshed.insert(url) }
                 guard let image = image else {
+                    // A cached picture is already up; a failed revalidation changes nothing.
+                    if self.image(for: url) != nil { return }
                     // Nothing was cached and no generation bump follows, so the row would keep its
                     // placeholder until .onAppear fired again — which a row already on screen never
                     // does. Retry instead, or the failure is permanent for this appearance.

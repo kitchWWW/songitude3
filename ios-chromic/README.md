@@ -39,6 +39,15 @@ artist's name anywhere pops to the root. `HomeRoot` (in `SplashRootView.swift`) 
 the cover; a QR deep link that makes a walk current presents the map too. Songitude's intro card
 is compiled but switched off (`Brand.showsIntroCard`).
 
+### Instant content
+
+Chromic publish rarely, so the app ships a snapshot of the catalog (filtered), the artist profile
+and the artwork in `Chromic/Seed/`. `ContentStore` reads **disk cache → seed**, so the first frame of
+every catalog screen is complete with no network; fetches still happen in the background and
+overwrite the disk copies for next time, silently. `tools/refresh_seed.py` takes the snapshot for
+*both* apps and runs as the "Refresh Seed" build phase on every build (offline it warns and keeps
+the last seed). Audio is not seeded — 223 MB — and still downloads on Start.
+
 Backgrounds: `LivingBackdrop` (the five paint layers swaying) behind the landing, the permission
 step and the list; the still `Backdrop` behind the walk page and About, where there is reading to do.
 Navigation is logged under the `nav` category (Console: subsystem `com.brianellissound.chromic`).

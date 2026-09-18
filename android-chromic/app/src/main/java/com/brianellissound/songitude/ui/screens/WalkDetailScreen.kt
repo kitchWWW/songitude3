@@ -29,6 +29,8 @@ fun WalkDetailScreen(
     onBack: () -> Unit,
 ) {
     val current by app.current.collectAsState()
+    val contentVersion by app.contentVersion.collectAsState()
+    val art = remember(walk.artUrl, contentVersion) { walk.artUrl?.let { app.content.cachedFile(it) } ?: walk.artUrl }
     val isCurrent = current?.id == walk.id
     // The catalog's copy first — it reflects an edit without republishing the bundle — then the
     // bundle's own `about`, for a walk that predates the catalog carrying one.
@@ -41,7 +43,7 @@ fun WalkDetailScreen(
             ScreenHeader(walk.name, onBack)
             ArtworkBox(Brand.PAGE_MEDIA_ASPECT, Modifier.padding(top = 41.dp).mediaHairlines()) {
                 AsyncImage(
-                    model = walk.artUrl, contentDescription = null,
+                    model = art, contentDescription = null,
                     contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
                 )
             }

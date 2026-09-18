@@ -51,17 +51,29 @@ final class ArtistStore: ObservableObject {
 
     func profile(_ id: String) -> ArtistProfile? { profiles[id] }
 
+    /// Profiles fetched this session; a cached one is shown at once and refreshed once.
+    private var refreshed: Set<String> = []
+
     func load(_ id: String) {
-        guard profiles[id] == nil, !inFlight.contains(id), let url = Self.url(for: id) else { return }
+        guard let url = Self.url(for: id) else { return }
+        // Cache-then-seed: the page reads complete on its first frame, and the fetch below only
+        // ever makes it newer.
+        if profiles[id] == nil, let data = ContentStore.cached(url),
+           let p = try? JSONDecoder().decode(ArtistProfile.self, from: data) {
+            profiles[id] = p
+        }
+        guard !refreshed.contains(id), !inFlight.contains(id) else { return }
         inFlight.insert(id)
         var req = URLRequest(url: url)
         req.cachePolicy = .reloadIgnoringLocalCacheData
         URLSession.shared.dataTask(with: req) { [weak self] data, _, _ in
             let decoded = data.flatMap { try? JSONDecoder().decode(ArtistProfile.self, from: $0) }
+            if decoded != nil, let data { ContentStore.store(data, for: url) }
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.inFlight.remove(id)
-                if let p = decoded { self.profiles[id] = p } else { self.failed.insert(id) }
+                if let p = decoded { self.profiles[id] = p; self.refreshed.insert(id) }
+                else if self.profiles[id] == nil { self.failed.insert(id) }
             }
         }.resume()
     }
@@ -76,6 +88,22 @@ final class RemoteCatalog: ObservableObject {
 
     static let manifestURL = URL(string: "https://songitude-walks.s3.amazonaws.com/walks/manifest.json")!
 
+    /// Opens on the last manifest fetched, or the release's seed — the list is never empty on
+    /// launch. `refresh` replaces it in the background.
+    init() {
+        if let data = ContentStore.cached(Self.manifestURL),
+           let m = try? JSONDecoder().decode(WalkManifest.self, from: data) {
+            walks = Self.sorted(Self.ours(m.walks), near: nil)
+        }
+    }
+
+    /// The catalog is Songitude's, shared by every player; this app shows one artist's corner of
+    /// it. Walks published before artist pages existed carry no artistId and are excluded too —
+    /// none of Chromic's predate them.
+    private static func ours(_ walks: [RemoteWalk]) -> [RemoteWalk] {
+        walks.filter { $0.artistId == Brand.artistID }
+    }
+
     /// `completion` fires on the main queue once the catalog has settled (success or failure), so
     /// pull-to-refresh can hold its spinner for the real duration of the fetch.
     func refresh(near: CLLocationCoordinate2D?, completion: (() -> Void)? = nil) {
@@ -88,15 +116,13 @@ final class RemoteCatalog: ObservableObject {
                 guard let self = self else { return }
                 self.loading = false
                 guard let data = data, let m = try? JSONDecoder().decode(WalkManifest.self, from: data) else {
-                    self.error = err?.localizedDescription ?? "Couldn't load the catalog."
+                    // With a cached list on screen a failed refresh is nobody's business.
+                    if self.walks.isEmpty { self.error = err?.localizedDescription ?? "Couldn't load the catalog." }
                     return
                 }
                 self.error = nil
-                // The catalog is Songitude's, shared by every player; this app shows one artist's
-                // corner of it. Walks published before artist pages existed carry no artistId and
-                // are excluded too — none of Chromic's predate them.
-                let ours = m.walks.filter { $0.artistId == Brand.artistID }
-                self.walks = Self.sorted(ours, near: near)
+                ContentStore.store(data, for: Self.manifestURL)
+                self.walks = Self.sorted(Self.ours(m.walks), near: near)
             }
         }.resume()
     }

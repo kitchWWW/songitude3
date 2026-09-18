@@ -55,6 +55,7 @@ fun SoundwalksScreen(
     val here by app.location.location.collectAsState()
     val downloaded by app.downloadedIds.collectAsState()
     val downloadingId by app.downloadingWalkId.collectAsState()
+    val contentVersion by app.contentVersion.collectAsState()
     val context = LocalContext.current
     var refreshing by remember { mutableStateOf(false) }
 
@@ -94,6 +95,8 @@ fun SoundwalksScreen(
                     else -> items(walks, key = { it.id }) { walk ->
                         WalkCard(
                             walk = walk, here = here,
+                            // Cache-then-seed: the disk (or seed) copy first, refetched behind it.
+                            art = remember(walk.artUrl, contentVersion) { walk.artUrl?.let { app.content.cachedFile(it) } ?: walk.artUrl },
                             canRemove = downloaded.contains(walk.id) && downloadingId != walk.id,
                             onOpen = { onOpen(walk) }, onArtist = onArtist,
                             onRemove = { app.deleteDownloaded(walk.id) },
@@ -132,6 +135,7 @@ fun SoundwalksScreen(
 private fun WalkCard(
     walk: RemoteWalk,
     here: LatLngD?,
+    art: Any?,
     canRemove: Boolean,
     onOpen: () -> Unit,
     onArtist: () -> Unit,
@@ -152,7 +156,7 @@ private fun WalkCard(
     ) {
         ArtworkBox(Brand.CARD_MEDIA_ASPECT) {
             AsyncImage(
-                model = walk.artUrl, contentDescription = null,
+                model = art, contentDescription = null,
                 contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
             )
         }

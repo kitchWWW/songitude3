@@ -7,7 +7,7 @@ then branded. Nothing merges automatically. When engine or flow work lands in `i
 # What has drifted, ignoring the deliberate brand differences.
 diff -ru ios/Songitude/Songitude ios-chromic/Chromic/Chromic \
   -x Assets.xcassets -x Info.plist -x '*.entitlements' -x Brand.swift \
-  -x SongitudeApp.swift -x ChromicApp.swift -x WalkDetailView.swift -x FirstRunView.swift -x AboutView.swift -x Fonts
+  -x SongitudeApp.swift -x ChromicApp.swift -x WalkDetailView.swift -x FirstRunView.swift -x AboutView.swift -x ContentStore.swift -x Fonts -x Seed
 
 # Port a single commit's ios/ changes (paths rewritten to the fork), then resolve any rejects.
 git format-patch -1 <sha> --stdout -- ios/Songitude/Songitude \
@@ -38,7 +38,11 @@ Expected, permanent differences — do not "fix" these when diffing:
   5.1.1(iv) logic (`requested` / `advance` / `onChange(authorization)`) is Songitude's verbatim —
   port changes to that logic by hand.
 - `WalkRow.swift`: `ArtworkCache` thumbnails are 1200px, not 256 — the artwork is drawn 360pt wide
-  here. `WalkRow` itself is now used only by `ArtistPageView`.
+  here — and `load` shows the `ContentStore` copy first, revalidating once per session. `WalkRow`
+  itself is now used only by `ArtistPageView`.
+- `RemoteCatalog.swift`: also `init` from the cached manifest, `ContentStore.store` on fetch, and
+  `ArtistStore.load` cache-then-seed. `ContentStore.swift` and `Seed/` are Chromic-only; the
+  "Refresh Seed" build phase too.
 - `ReportView.swift`: footer wording, the `"app"` field, the `NSError` domain.
 - `SettingsView.swift`: the credits rows.
 - `ChromicApp.swift` vs `SongitudeApp.swift`: struct name and the AASA comment.

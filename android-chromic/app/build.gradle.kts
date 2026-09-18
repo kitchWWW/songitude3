@@ -80,3 +80,13 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     debugImplementation(libs.androidx.ui.tooling)
 }
+
+// The baked-in catalog/bio/artwork snapshot (assets/seed), refreshed before every build so a
+// release can never ship a stale one. The script is shared with the iOS fork; offline it warns
+// and keeps the last seed rather than failing the build.
+val refreshSeed by tasks.registering(Exec::class) {
+    description = "Refresh the Chromic content seed for both apps"
+    commandLine("python3", rootProject.file("../ios-chromic/tools/refresh_seed.py").absolutePath)
+    isIgnoreExitValue = true
+}
+tasks.named("preBuild") { dependsOn(refreshSeed) }

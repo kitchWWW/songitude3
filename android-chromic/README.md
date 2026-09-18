@@ -50,6 +50,14 @@ Until then the SDK logs `Authorization failure` and the map is a blank tile.
 | Credits | Brian Ellis | Chromic, then Brian Ellis / Songitude engine |
 | Nav logging | — | logcat tag `ChromicNav`: every screen change and first-run step |
 
+### Instant content
+
+As on iOS: `assets/seed/` carries the filtered manifest, the artist profile and the artwork;
+`data/ContentStore.kt` reads disk cache → seed so the first frame is complete offline, and
+`AppState.refreshCatalog` / `loadArtist` refetch in the background and store the result (artwork
+revalidates after the manifest; `contentVersion` makes the cards re-read it). The Gradle task
+`refreshSeed` runs `ios-chromic/tools/refresh_seed.py` before every build.
+
 Everything brand-specific in code goes through `ui/Brand.kt`. Screens: `ui/screens/FirstRunScreen.kt`,
 `AboutScreen.kt`, `SoundwalksScreen.kt`, `WalkDetailScreen.kt`; the root is `MainActivity.kt`
 (`FirstRun` / `HomeRoot`). Songitude's `WalksBrowserScreen`, `OnboardingScreen`, `SplashOverlay`,

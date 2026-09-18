@@ -1,0 +1,90 @@
+{
+ "version": 1,
+ "generatedAt": "2026-09-10T01:41:47.265Z",
+ "walks": [
+  {
+   "id": "garden-of-memories-7cf9a10a",
+   "name": "Garden of Memories",
+   "creator": "chromic duo",
+   "about": "Garden of Memories is an immersive AR soundwalk commissioned by Washington Performing Arts and Tregaron Conservancy, with support from the DC Commission on the Arts and Humanities. Bringing together site-specific stories, music, field recordings, and sound design, the work invites visitors to wander the Conservancy\u2019s trails while discovering a hidden layer of stories and sounds connected to the landscape.\n\nInspired by the ways places become intertwined with the people and memories we carry, Garden of Memories explores how stories can transform a landscape into something deeply personal. A conversation shared on a familiar path, a loved one remembered through a daily walk, a place of comfort or solitude\u2014these moments become part of the landscapes we inhabit. Alongside personal stories are tales drawn from folklore and music inspired by seasons, inviting visitors to reflection and encouraging them to slow down, listen closely, and make space for their own memories and questions. \n\nTake a walk through the Tregaron Conservancy, into a journey through the stories held within a landscape, and the memories it awakens within us.",
+   "artistId": "80cda9dee7513416",
+   "artUrl": "https://songitude-walks.s3.amazonaws.com/walks/garden-of-memories-7cf9a10a/IMG_4390.jpg",
+   "portable": false,
+   "center": [
+    38.93163900447185,
+    -77.05970406532289
+   ],
+   "zoom": 18,
+   "shapeCount": 9,
+   "owner": "chromic.duo@gmail.com",
+   "updatedAt": "2026-09-02T18:53:24.227Z",
+   "sizeBytes": 42560893,
+   "base": "https://songitude-walks.s3.amazonaws.com/walks/garden-of-memories-7cf9a10a",
+   "mapUrl": "https://songitude-walks.s3.amazonaws.com/walks/garden-of-memories-7cf9a10a/map.json",
+   "zipUrl": "https://songitude-walks.s3.amazonaws.com/walks/garden-of-memories-7cf9a10a/bundle.zip"
+  },
+  {
+   "id": "listen-to-chinatown-63861edd",
+   "name": "Listen to Chinatown",
+   "creator": "chromic duo",
+   "about": "\"Listen to Chinatown\" is a site-specific Augmented Reality experience that takes listeners through Manhattan's Chinatown, following in the footsteps of the deep and expansive history of community members, and shares the intricate complexity of what it means to come \"back home\". \n\nPartnering with Chinatown\u2019s BID, local businesses, spatial technology (AR) and cultural history experts Mott Street Girls, Listen to Chinatown brings stories beyond the storefront to life to celebrate Chinatown\u2019s vibrant community and history. \n\nListen to Chinatown was later adapted into a concert work, Homecoming, and premiered at Baryshnikov Arts Center. \n\nLocal Businesses:\n- Fong On Tofu Shop, 81 Division Street\n- Nom Wah Dim Sum Parlor, 13 Doyers Street\n- Ting\u2019s Gift Shop, 18 Doyers Street\n- Artbean Cafe, 19 Doyers Street \n- Tonii\u2019s Fresh Rice Noodles, 83 Bayard Street\n- Yu & Me Books\n\nCommunity Collaborators:\n- Welcome to Chinatown\n- Mott Street Girls\n\nMurals: \n- \u201cDragon Lion Medley\u201d, 127 Division Street\n- \u201cZodiac Dim Sum\u201d, 100 Division Street \n\nMural Artist: \n- Peach Tao\n- Jocelyn Tsaih\n\nPoet: \n- Jiaoyang Li\n\nMusic and Sound Design:\n- \u201dOolong Tea\u201d Vivi Hu\n- Chien-An Yuan\n- \u201dQuiet\u201d Dolly Ave\n- Chromic Duo",
+   "artistId": "80cda9dee7513416",
+   "artUrl": "https://songitude-walks.s3.amazonaws.com/walks/listen-to-chinatown-63861edd/TourImage.jpg",
+   "portable": false,
+   "center": [
+    40.71613521878096,
+    -74.00124549865724
+   ],
+   "zoom": 16,
+   "shapeCount": 5,
+   "owner": "chromic.duo@gmail.com",
+   "updatedAt": "2026-09-02T17:40:28.151Z",
+   "sizeBytes": 60651742,
+   "base": "https://songitude-walks.s3.amazonaws.com/walks/listen-to-chinatown-63861edd",
+   "mapUrl": "https://songitude-walks.s3.amazonaws.com/walks/listen-to-chinatown-63861edd/map.json",
+   "zipUrl": "https://songitude-walks.s3.amazonaws.com/walks/listen-to-chinatown-63861edd/bundle.zip"
+  },
+  {
+   "id": "emerald-futures-04e8fdfa",
+   "name": "Emerald Futures",
+   "creator": "chromic duo",
+   "about": "Immersive concert experience & Augmented Reality Soundwalk, in collaboration with NY Philharmonic Very Young Composers Program and Amanda Phingbodhipakkiya. \n\nProgram:\nMatilda Surla, \"nothing\"\nDevon Lee, \"Sinking\"\nMichael Rodiguez, \"Practice Frustration\" \nJordan Millar, \"Constellations\" \nGil Vardi, \"untitled\" \nDalya Shaman, \"Storm\" \nOwen Berenbom, \"Arctic Meltdown\"\nTristan Hu, \"Winter Storm\"\nIlana Rahim-Braden, \"ignoring confusion\"\nMack Scocca-Ho, \"Baroque and Repaired\" \nHayden Fung, \"Balance\"\nAlexander Rothschild-Douaihy, \"Sunlight\" \n\nPerformed + Produced by Chromic Duo \nTeaching Artists: Jess Marlor, Danny Felsenfeld\n\nFor more info on \"We Belong Here\" and to find out how you can get involved to bringing NYC back to life, go to: \nwww.istillbelieve.nyc/ ",
+   "artistId": "80cda9dee7513416",
+   "artUrl": "https://songitude-walks.s3.amazonaws.com/walks/emerald-futures-04e8fdfa/Screen%20Shot%202021-06-30%20at%2015.54.33.png",
+   "portable": false,
+   "center": [
+    40.775325582986405,
+    -73.98358583450319
+   ],
+   "zoom": 16,
+   "shapeCount": 10,
+   "owner": "chromic.duo@gmail.com",
+   "updatedAt": "2026-09-02T17:38:07.738Z",
+   "sizeBytes": 61254366,
+   "base": "https://songitude-walks.s3.amazonaws.com/walks/emerald-futures-04e8fdfa",
+   "mapUrl": "https://songitude-walks.s3.amazonaws.com/walks/emerald-futures-04e8fdfa/map.json",
+   "zipUrl": "https://songitude-walks.s3.amazonaws.com/walks/emerald-futures-04e8fdfa/bundle.zip"
+  },
+  {
+   "id": "how-fragile-we-bloom-79119a1c",
+   "name": "how fragile, we bloom",
+   "creator": "chromic duo",
+   "about": "Citing poet Amanda Gorman\u2019s \u201cThe Hill We Climb\u201d, \u201chow fragile, we bloom\u201d takes listeners through a guided walk in the Herbert & Hyonja Abrons Woodland trail at Wave Hill Public Gardens, created in collaboration with their Art, Community, Education and Science (ACES) youth interns.\n\nAlongside Chromic Duo's sound design, narration and composition, stories from the youths have been incorporated into a site-specific, meditative soundwalk that invites audiences to reflect upon this current moment in history. The youths' stories speak to individual and collective experiences, creating a storytelling capsule. Through communal creation and connection, Chromic Duo provides a platform for Wave Hill visitors to contemplate the ways that seasons bring change, their own relationships to nature and the larger community, and ultimately, how to support one another through times of uncertainty, and build a future arched towards collective liberation. ",
+   "artistId": "80cda9dee7513416",
+   "artUrl": "https://songitude-walks.s3.amazonaws.com/walks/how-fragile-we-bloom-79119a1c/IMG_6916.jpg",
+   "portable": false,
+   "center": [
+    40.8984790597676,
+    -73.91433119773866
+   ],
+   "zoom": 17,
+   "shapeCount": 5,
+   "owner": "chromic.duo@gmail.com",
+   "updatedAt": "2026-09-02T17:26:47.882Z",
+   "sizeBytes": 58475176,
+   "base": "https://songitude-walks.s3.amazonaws.com/walks/how-fragile-we-bloom-79119a1c",
+   "mapUrl": "https://songitude-walks.s3.amazonaws.com/walks/how-fragile-we-bloom-79119a1c/map.json",
+   "zipUrl": "https://songitude-walks.s3.amazonaws.com/walks/how-fragile-we-bloom-79119a1c/bundle.zip"
+  }
+ ]
+}

@@ -7,7 +7,7 @@ so a patch against `android/` applies here with only the directory prefix rewrit
 ```bash
 # What has drifted, ignoring the deliberate brand differences.
 diff -ru android/app/src/main/java android-chromic/app/src/main/java \
-  -x Brand.kt -x FirstRunScreen.kt -x AboutScreen.kt -x SoundwalksScreen.kt -x WalkDetailScreen.kt
+  -x Brand.kt -x FirstRunScreen.kt -x AboutScreen.kt -x SoundwalksScreen.kt -x WalkDetailScreen.kt -x ContentStore.kt -x seed
 
 # Port a single commit's android/ changes, then resolve any rejects.
 git format-patch -1 <sha> --stdout -- android/app/src/main \
@@ -27,7 +27,10 @@ Expected, permanent differences — do not "fix" these when diffing:
   the map as an overlay, system Back walking it). Songitude's `Route`/splash/auto-open-the-list
   logic is gone. Nav logging under `ChromicNav`.
 - `AppState.kt`: `maybeShowIntroCard` / `presentIntroCard` gated on `Brand.SHOWS_INTRO_CARD`; the
-  `artistId` filter in `refreshCatalog`.
+  `artistId` filter in `refreshCatalog`; `init` opens on the cached manifest, `refreshCatalog` and
+  `loadArtist` go through `ContentStore` (cache-then-seed, store on fetch), `contentVersion`.
+- `app/build.gradle.kts`: the `refreshSeed` task on `preBuild`. `data/ContentStore.kt` and
+  `assets/seed/` are Chromic-only.
 - `ui/MapScreen.kt`: `onOpenBrowser` → `onShowWalk` + `onBrowse`; Dorothy's icons for settings,
   home, play/pause (the disc *is* the button) and ±15 s; the title button leaves for the walk page.
 - `ui/Cards.kt`: the intro card's close icon (unreachable, kept in step).

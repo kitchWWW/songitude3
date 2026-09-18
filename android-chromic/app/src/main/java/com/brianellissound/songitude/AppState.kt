@@ -10,6 +10,11 @@ import com.brianellissound.songitude.audio.RenderEngine
 import com.brianellissound.songitude.data.ArtistProfile
 import com.brianellissound.songitude.data.CatalogService
 import com.brianellissound.songitude.data.DownloadPhase
+import kotlinx.serialization.decodeFromString
+import com.brianellissound.songitude.model.SongitudeJson
+import com.brianellissound.songitude.data.WalkManifest
+import com.brianellissound.songitude.data.ContentStore
+import com.brianellissound.songitude.data.CatalogEndpoints
 import com.brianellissound.songitude.data.ExperienceLibrary
 import com.brianellissound.songitude.data.RemoteWalk
 import com.brianellissound.songitude.data.WalkDownloader
@@ -130,6 +135,14 @@ class AppState(app: Application) : AndroidViewModel(app) {
     private val _artists = MutableStateFlow<Map<String, ArtistProfile>>(emptyMap())
     val artists: StateFlow<Map<String, ArtistProfile>> = _artists.asStateFlow()
     private val artistsInFlight = HashSet<String>()
+    private val artistsRefreshed = HashSet<String>()
+
+    /** Cache-then-seed store for the manifest, the profile and artwork (Chromic only). */
+    val content = ContentStore(app)
+
+    /** Bumped when a piece of artwork on disk is replaced by a fresher fetch, so cards re-read it. */
+    private val _contentVersion = MutableStateFlow(0)
+    val contentVersion: StateFlow<Int> = _contentVersion.asStateFlow()
 
     // MARK: - Internal
 
@@ -177,6 +190,12 @@ class AppState(app: Application) : AndroidViewModel(app) {
 
     init {
         _experiences.value = ExperienceLibrary.loadAll(ctx)
+        // Open on the last manifest fetched, or the release's seed — the list is never empty on
+        // launch. refreshCatalog() replaces it in the background.
+        content.cached(CatalogEndpoints.MANIFEST)?.let { bytes ->
+            runCatching { SongitudeJson.decodeFromString<WalkManifest>(bytes.decodeToString()).walks }
+                .getOrNull()?.let { _walks.value = CatalogService.sorted(ours(it), null) }
+        }
         // A walk still loaded from earlier in this process — the Activity was recreated while it
         // played, most likely with the phone pocketed. Adopt it without touching the engine, which
         // is still sounding it. With nothing loaded the app opens on the walks selector rather than
@@ -236,36 +255,55 @@ class AppState(app: Application) : AndroidViewModel(app) {
         prefs.edit().putString(APPEARANCE_KEY, a.key).apply()
     }
 
+    /** The catalog is Songitude's, shared by every player; this app shows one artist's corner of
+     *  it. Walks published before artist pages existed carry no artistId and are excluded too —
+     *  none of Chromic's predate them. */
+    private fun ours(list: List<RemoteWalk>) = list.filter { it.artistId == Brand.ARTIST_ID }
+
     fun refreshCatalog(onDone: (() -> Unit)? = null) {
         _catalogLoading.value = true
         viewModelScope.launch {
-            val result = CatalogService.fetchManifest()
+            val bytes = content.refresh(CatalogEndpoints.MANIFEST)
+            val list = bytes?.let { b ->
+                runCatching { SongitudeJson.decodeFromString<WalkManifest>(b.decodeToString()).walks }.getOrNull()
+            }
             _catalogLoading.value = false
-            result.fold(
-                onSuccess = { list ->
-                    _catalogError.value = null
-                    // The catalog is Songitude's, shared by every player; this app shows one
-                    // artist's corner of it. Walks published before artist pages existed carry no
-                    // artistId and are excluded too — none of Chromic's predate them.
-                    val ours = list.filter { it.artistId == Brand.ARTIST_ID }
-                    _walks.value = CatalogService.sorted(ours, location.lastKnownLocation)
-                    processPendingWalk()
-                },
-                onFailure = { e ->
-                    _catalogError.value = e.message ?: "Couldn't load the catalog."
-                },
-            )
+            if (list != null) {
+                _catalogError.value = null
+                val mine = ours(list)
+                _walks.value = CatalogService.sorted(mine, location.lastKnownLocation)
+                processPendingWalk()
+                // Artwork revalidates behind the list: whatever is on disk (or in the seed) is
+                // already showing, so a newer picture simply replaces it when it lands.
+                for (w in mine) w.artUrl?.let { url ->
+                    if (content.refresh(url) != null) _contentVersion.value += 1
+                }
+            } else if (_walks.value.isEmpty()) {
+                // With a cached list on screen a failed refresh is nobody's business.
+                _catalogError.value = "Couldn't load the catalog."
+            }
             onDone?.invoke()
         }
     }
 
     fun loadArtist(id: String) {
-        if (_artists.value.containsKey(id) || artistsInFlight.contains(id)) return
+        val url = CatalogEndpoints.artist(id)
+        // Cache-then-seed: the page reads complete on its first frame; the fetch below only ever
+        // makes it newer, and is made once per session.
+        if (!_artists.value.containsKey(id)) {
+            content.cached(url)?.let { bytes ->
+                runCatching { SongitudeJson.decodeFromString<ArtistProfile>(bytes.decodeToString()) }
+                    .getOrNull()?.let { _artists.value = _artists.value + (id to it) }
+            }
+        }
+        if (artistsRefreshed.contains(id) || artistsInFlight.contains(id)) return
         artistsInFlight.add(id)
         viewModelScope.launch {
-            val p = CatalogService.fetchArtist(id)
+            val p = content.refresh(url)?.let { b ->
+                runCatching { SongitudeJson.decodeFromString<ArtistProfile>(b.decodeToString()) }.getOrNull()
+            }
             artistsInFlight.remove(id)
-            if (p != null) _artists.value = _artists.value + (id to p)
+            if (p != null) { _artists.value = _artists.value + (id to p); artistsRefreshed.add(id) }
         }
     }
 
