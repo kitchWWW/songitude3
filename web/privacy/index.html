@@ -27,7 +27,7 @@
   <div class="wrap">
     <a class="home" href="/">← Songitude</a>
     <h1>Privacy Policy</h1>
-    <p class="updated">Last updated: August 10, 2026</p>
+    <p class="updated">Last updated: September 12, 2026</p>
 
     <p>Songitude is a location-based audio experience: it plays different sounds depending on where
       you are physically standing. This policy explains exactly what data is involved.</p>
@@ -44,6 +44,16 @@
       to decide which sounds you should hear. This processing happens <b>on your device</b>. The
       "walks near you" ordering is computed on your device using your most recent location. At no
       point is your location sent to Songitude's servers or any third party.</p>
+
+    <h2>Background location</h2>
+    <p>A soundwalk is meant to be heard with the phone locked and in your pocket. So while a walk
+      is <b>playing</b>, the app keeps reading your location with the screen off, for the same
+      single purpose: choosing what you hear as you move. Location access starts when you press
+      play and stops when you stop the walk, quit the app, or the walk ends. When nothing is
+      playing, the app does not read your location at all.</p>
+    <p>On Android this runs as a foreground service, which is why a persistent notification is
+      shown while a walk plays. That notification is the lock-screen transport (pause, skip) and
+      the only notification the app ever shows &mdash; we send no alerts, reminders or messages.</p>
 
     <h2>Compass heading</h2>
     <p>Some soundwalks are designed to be played anywhere: when you open one, the app reads your
@@ -75,9 +85,35 @@
         function that verifies a creator's Google sign-in when publishing. It never receives your location.</li>
       <li><b>Google Sign-In</b> — used only to authenticate approved creators. Governed by Google's
         privacy policy.</li>
-      <li><b>Map tiles (OpenStreetMap / CARTO)</b> — used to draw the map. Standard tile requests do
-        not include your precise location.</li>
+      <li><b>Map tiles (OpenStreetMap / CARTO)</b> — used to draw the map on iOS and the web.
+        Standard tile requests do not include your precise location.</li>
+      <li><b>Google Maps SDK</b> — draws the map in the Android app. The SDK requests map imagery
+        for the area on screen and is governed by
+        <a href="https://policies.google.com/privacy">Google's privacy policy</a>; the app never
+        passes your location to it beyond what is needed to draw the map you are looking at.</li>
+      <li><b>Server logs</b> — like any web server, the walk catalog records standard request logs
+        (IP address, file requested, time) when a walk is downloaded. These are used only to keep
+        the service running and are not linked to you or to your location.</li>
     </ul>
+
+    <h2>Permissions the apps ask for</h2>
+    <ul>
+      <li><b>Location (precise, and in the background)</b> — to play the right sounds for where
+        you are, while a walk is playing. See above.</li>
+      <li><b>Notifications (Android)</b> — solely so the playback notification can be shown while
+        a walk plays. Nothing else is ever sent.</li>
+      <li><b>Network</b> — to download walks from the public catalog. Walks are downloaded in full
+        before you set off, so nothing streams while you walk.</li>
+    </ul>
+    <p>Every permission can be declined or revoked in your device settings; the app degrades rather
+      than breaks, and it never asks for a permission it does not need for the feature in front of
+      you.</p>
+
+    <h2>Your data, and deleting it</h2>
+    <p>Listeners have nothing stored about them, so there is nothing to delete: uninstalling the app
+      removes the walks and settings cached on your device. Creators who publish walks can delete
+      any walk they own from the editor, and can ask us to remove their account email and artist
+      page entirely by emailing the address below.</p>
 
     <h2>Children</h2>
     <p>Songitude is not directed to children under 13 and does not knowingly collect their data.</p>
