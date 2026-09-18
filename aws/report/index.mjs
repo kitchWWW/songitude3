@@ -40,6 +40,8 @@ export const handler = async (event) => {
       subjectName ? `Subject:     ${subjectName}` : null,
       b.walkId ? `Walk id:     ${clip(b.walkId, 120)}` : null,
       b.artist ? `Artist:      ${clip(b.artist, 200)}` : null,
+      // Sent by the branded forks (Chromic); Songitude itself omits it.
+      b.app ? `App:         ${clip(b.app, 60)}` : null,
       b.appVersion ? `App version: ${clip(b.appVersion, 40)}` : null,
       b.device ? `Device:      ${clip(b.device, 80)}` : null,
       `Received:    ${new Date().toISOString()}`,

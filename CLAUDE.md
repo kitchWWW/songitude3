@@ -10,6 +10,8 @@ the real space and hear it via GPS. One bundle format is shared across every com
 | `editor/` | Front-end-only authoring app. Draw shapes, assign audio, preview with a virtual listener, export/import `.zip`, publish. | Vanilla JS IIFE, no build step. Leaflet + JSZip + qrcode-generator + Google Identity, all via CDN. |
 | `ios/` | SwiftUI app that plays a bundle for real using GPS, with background audio. | SwiftUI, AVAudioEngine, CoreLocation, MapKit. |
 | `android/` | The same player for Android: same bundles, same catalog, same playback rules. | Kotlin, Jetpack Compose, one `AudioTrack` + a software mixer, fused location, Google Maps. |
+| `ios-chromic/` | **Fork of `ios/`** branded for the artist Chromic: lists only their walks (`artistId` filter), own name/icon/type/backgrounds, About-rooted flow with the map on top. Kept in step by hand — see `ios-chromic/SYNC.md`. | Same as `ios/`. |
+| `android-chromic/` | **Fork of `android/`**, the Android twin of `ios-chromic/` decision for decision. Same package, new `applicationId`. See `android-chromic/SYNC.md`. | Same as `android/`. |
 | `web/` | Marketing site, browser player (`listen/`), privacy/support pages, deep-link landing (`w.html`), AASA. | Vanilla JS + Leaflet. |
 | `aws/` | Serverless publish backend: two Node 20 Lambdas + an S3 bucket. | AWS SDK v3, `adm-zip`. |
 | `shared/FORMAT.md` | **Source of truth** for the bundle format. Update it when the format changes. | — |
@@ -37,19 +39,22 @@ editors keep playing in newer apps/players without migration. When you add or ch
 - **A missing field must decode to the old behavior.** Every reader supplies the historical default
   when the key is absent (e.g. `loopMode` absent ⇒ `"simple"`; `dialogueColors`/`intro`/`exit` absent
   ⇒ none). iOS relies on optional Swift properties + fallbacks; JS uses `x ?? default`.
-- Apply the default in **all five readers** (editor, web player, iOS, Android, and the manifest
-  Lambda if it reads the field) and document the new field + its default in `shared/FORMAT.md`.
+- Apply the default in **all seven readers** (editor, web player, iOS, Chromic iOS, Android, Chromic Android,
+  and the manifest Lambda if it reads the field) and document the new field + its default in `shared/FORMAT.md`.
 - Don't gate a new field behind a `version` bump that old readers reject — bump `version` only for a
   genuinely breaking change, which we avoid.
 
-### Playback modes — semantics MUST stay identical in all FOUR engines
+### Playback modes — semantics MUST stay identical in all SIX engines
 
 The editor preview (`editor/editor.js` `engine`), the web player (`web/listen/player.js`), the iOS
-app (`ios/.../AudioEngine.swift`) and the Android app (`android/.../audio/RenderEngine.kt`) each
-implement the same state machine. **Change one → change all four** (and `FORMAT.md`).
+app (`ios/.../AudioEngine.swift`), the Android app (`android/.../audio/RenderEngine.kt`), and the
+two Chromic forks (`ios-chromic/.../AudioEngine.swift`, `android-chromic/.../RenderEngine.kt`) each
+implement the same state machine. **Change one → change all six** (and `FORMAT.md`). The Chromic
+copies are literal forks, so an engine change is ported with the recipe in each fork's `SYNC.md`,
+not assumed.
 
 There is no "primary" implementation. A fix to a mode, a fade, the dialogue queue, solo ducking or
-the intro/exit sequence is not finished until it exists in all four — a walk has to sound the same
+the intro/exit sequence is not finished until it exists in all six — a walk has to sound the same
 wherever it is heard, and the format is the only contract holding that together.
 
 - `loop` — loops while inside; fades in/out; circle loops honor `falloff` (proximity gain).
@@ -133,6 +138,6 @@ wherever it is heard, and the format is the only contract holding that together.
   sections in iOS; idiomatic Kotlin with KDoc on Android. Comments explain *why*, not *what* — and on
   the players especially, why a platform forced a different shape.
 - No frameworks or build steps in the editor/web — keep them CDN-loaded and open-in-browser.
-- When touching playback behavior or the bundle shape, update `FORMAT.md` and all four engines
-  (editor preview, web player, iOS, Android). Android is not a port that trails the others; it is a
+- When touching playback behavior or the bundle shape, update `FORMAT.md` and all six engines
+  (editor preview, web player, iOS, Android, and both Chromic forks). Android is not a port that trails the others; it is a
   player like any of them.

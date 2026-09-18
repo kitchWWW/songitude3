@@ -1,0 +1,385 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1A0000000000000000000810 /* ChromicApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000710 /* ChromicApp.swift */; };
+		1A0000000000000000000811 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000711 /* AppState.swift */; };
+		1A0000000000000000000824 /* Brand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000724 /* Brand.swift */; };
+		1A0000000000000000000812 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000712 /* Models.swift */; };
+		1A0000000000000000000813 /* ExperienceLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000713 /* ExperienceLibrary.swift */; };
+		1A0000000000000000000814 /* LocationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000714 /* LocationManager.swift */; };
+		1A0000000000000000000815 /* AudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000715 /* AudioEngine.swift */; };
+		1A0000000000000000000816 /* GeoUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000716 /* GeoUtils.swift */; };
+		1A0000000000000000000817 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000717 /* ContentView.swift */; };
+		1A0000000000000000000818 /* MapOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000718 /* MapOverlayView.swift */; };
+		1A0000000000000000000819 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000719 /* OnboardingView.swift */; };
+		1A000000000000000000081A /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000071A /* SettingsView.swift */; };
+		1A000000000000000000081B /* RemoteCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000071B /* RemoteCatalog.swift */; };
+		1A000000000000000000081C /* WalksBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000071C /* WalksBrowserView.swift */; };
+		1A000000000000000000081D /* WalkRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000071D /* WalkRow.swift */; };
+		1A000000000000000000081E /* ArtistPageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000071E /* ArtistPageView.swift */; };
+		1A000000000000000000081F /* WalkIntroCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000000000000000000071F /* WalkIntroCard.swift */; };
+		1A0000000000000000000820 /* SongitudeMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000720 /* SongitudeMark.swift */; };
+		1A0000000000000000000821 /* SplashRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000721 /* SplashRootView.swift */; };
+		1A0000000000000000000822 /* ReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000722 /* ReportView.swift */; };
+		1A0000000000000000000823 /* FarAwayCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000723 /* FarAwayCard.swift */; };
+		1A0000000000000000000902 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000702 /* Assets.xcassets */; };
+		1A0000000000000000000903 /* Fonts in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000704 /* Fonts */; };
+		1A0000000000000000000825 /* WalkDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000725 /* WalkDetailView.swift */; };
+		1A0000000000000000000826 /* FirstRunView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000726 /* FirstRunView.swift */; };
+		1A0000000000000000000827 /* AboutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000000000000000000727 /* AboutView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		1A0000000000000000000400 /* Chromic.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Chromic.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A0000000000000000000700 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		1A0000000000000000000702 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		1A0000000000000000000710 /* ChromicApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromicApp.swift; sourceTree = "<group>"; };
+		1A0000000000000000000711 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		1A0000000000000000000724 /* Brand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Brand.swift; sourceTree = "<group>"; };
+		1A0000000000000000000712 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		1A0000000000000000000713 /* ExperienceLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExperienceLibrary.swift; sourceTree = "<group>"; };
+		1A0000000000000000000714 /* LocationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationManager.swift; sourceTree = "<group>"; };
+		1A0000000000000000000715 /* AudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEngine.swift; sourceTree = "<group>"; };
+		1A0000000000000000000716 /* GeoUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoUtils.swift; sourceTree = "<group>"; };
+		1A0000000000000000000717 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		1A0000000000000000000718 /* MapOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapOverlayView.swift; sourceTree = "<group>"; };
+		1A0000000000000000000719 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		1A000000000000000000071A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		1A000000000000000000071B /* RemoteCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteCatalog.swift; sourceTree = "<group>"; };
+		1A000000000000000000071C /* WalksBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalksBrowserView.swift; sourceTree = "<group>"; };
+		1A000000000000000000071D /* WalkRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalkRow.swift; sourceTree = "<group>"; };
+		1A000000000000000000071E /* ArtistPageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtistPageView.swift; sourceTree = "<group>"; };
+		1A000000000000000000071F /* WalkIntroCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalkIntroCard.swift; sourceTree = "<group>"; };
+		1A0000000000000000000720 /* SongitudeMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SongitudeMark.swift; sourceTree = "<group>"; };
+		1A0000000000000000000721 /* SplashRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SplashRootView.swift; sourceTree = "<group>"; };
+		1A0000000000000000000722 /* ReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportView.swift; sourceTree = "<group>"; };
+		1A0000000000000000000723 /* FarAwayCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarAwayCard.swift; sourceTree = "<group>"; };
+		1A0000000000000000000703 /* Chromic.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Chromic.entitlements; sourceTree = "<group>"; };
+		1A0000000000000000000704 /* Fonts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Fonts; sourceTree = "<group>"; };
+		1A0000000000000000000725 /* WalkDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalkDetailView.swift; sourceTree = "<group>"; };
+		1A0000000000000000000726 /* FirstRunView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstRunView.swift; sourceTree = "<group>"; };
+		1A0000000000000000000727 /* AboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		1A0000000000000000000501 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1A0000000000000000000200 = {
+			isa = PBXGroup;
+			children = (
+				1A0000000000000000000202 /* Chromic */,
+				1A0000000000000000000201 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		1A0000000000000000000201 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000000000000000000400 /* Chromic.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		1A0000000000000000000202 /* Chromic */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000000000000000000710 /* ChromicApp.swift */,
+				1A0000000000000000000724 /* Brand.swift */,
+				1A0000000000000000000711 /* AppState.swift */,
+				1A0000000000000000000712 /* Models.swift */,
+				1A0000000000000000000716 /* GeoUtils.swift */,
+				1A0000000000000000000713 /* ExperienceLibrary.swift */,
+				1A0000000000000000000714 /* LocationManager.swift */,
+				1A0000000000000000000715 /* AudioEngine.swift */,
+				1A000000000000000000071B /* RemoteCatalog.swift */,
+				1A0000000000000000000203 /* Views */,
+				1A0000000000000000000702 /* Assets.xcassets */,
+				1A0000000000000000000704 /* Fonts */,
+				1A0000000000000000000700 /* Info.plist */,
+				1A0000000000000000000703 /* Chromic.entitlements */,
+			);
+			path = Chromic;
+			sourceTree = "<group>";
+		};
+		1A0000000000000000000203 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000000000000000000717 /* ContentView.swift */,
+				1A0000000000000000000718 /* MapOverlayView.swift */,
+				1A0000000000000000000719 /* OnboardingView.swift */,
+				1A000000000000000000071A /* SettingsView.swift */,
+				1A000000000000000000071C /* WalksBrowserView.swift */,
+				1A0000000000000000000725 /* WalkDetailView.swift */,
+				1A0000000000000000000726 /* FirstRunView.swift */,
+				1A0000000000000000000727 /* AboutView.swift */,
+				1A0000000000000000000722 /* ReportView.swift */,
+				1A0000000000000000000723 /* FarAwayCard.swift */,
+				1A0000000000000000000721 /* SplashRootView.swift */,
+				1A0000000000000000000720 /* SongitudeMark.swift */,
+				1A000000000000000000071F /* WalkIntroCard.swift */,
+				1A000000000000000000071E /* ArtistPageView.swift */,
+				1A000000000000000000071D /* WalkRow.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1A0000000000000000000300 /* Chromic */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A0000000000000000000601 /* Build configuration list for PBXNativeTarget "Chromic" */;
+			buildPhases = (
+				1A0000000000000000000500 /* Sources */,
+				1A0000000000000000000501 /* Frameworks */,
+				1A0000000000000000000502 /* Resources */,
+				1A0000000000000000000503 /* Import Experiences */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Chromic;
+			productName = Chromic;
+			productReference = 1A0000000000000000000400 /* Chromic.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		1A0000000000000000000100 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					1A0000000000000000000300 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = 1A0000000000000000000600 /* Build configuration list for PBXProject "Chromic" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 1A0000000000000000000200;
+			productRefGroup = 1A0000000000000000000201 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				1A0000000000000000000300 /* Chromic */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1A0000000000000000000502 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A0000000000000000000902 /* Assets.xcassets in Resources */,
+				1A0000000000000000000903 /* Fonts in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		1A0000000000000000000503 /* Import Experiences */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Import Experiences";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/import_experiences.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1A0000000000000000000500 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A0000000000000000000810 /* ChromicApp.swift in Sources */,
+				1A0000000000000000000824 /* Brand.swift in Sources */,
+				1A0000000000000000000811 /* AppState.swift in Sources */,
+				1A0000000000000000000812 /* Models.swift in Sources */,
+				1A0000000000000000000816 /* GeoUtils.swift in Sources */,
+				1A0000000000000000000813 /* ExperienceLibrary.swift in Sources */,
+				1A0000000000000000000814 /* LocationManager.swift in Sources */,
+				1A0000000000000000000815 /* AudioEngine.swift in Sources */,
+				1A0000000000000000000817 /* ContentView.swift in Sources */,
+				1A0000000000000000000818 /* MapOverlayView.swift in Sources */,
+				1A0000000000000000000819 /* OnboardingView.swift in Sources */,
+				1A000000000000000000081A /* SettingsView.swift in Sources */,
+				1A000000000000000000081B /* RemoteCatalog.swift in Sources */,
+				1A000000000000000000081C /* WalksBrowserView.swift in Sources */,
+				1A0000000000000000000825 /* WalkDetailView.swift in Sources */,
+				1A0000000000000000000826 /* FirstRunView.swift in Sources */,
+				1A0000000000000000000827 /* AboutView.swift in Sources */,
+				1A0000000000000000000822 /* ReportView.swift in Sources */,
+				1A0000000000000000000823 /* FarAwayCard.swift in Sources */,
+				1A0000000000000000000821 /* SplashRootView.swift in Sources */,
+				1A0000000000000000000820 /* SongitudeMark.swift in Sources */,
+				1A000000000000000000081F /* WalkIntroCard.swift in Sources */,
+				1A000000000000000000081E /* ArtistPageView.swift in Sources */,
+				1A000000000000000000081D /* WalkRow.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		1A0000000000000000000602 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		1A0000000000000000000603 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		1A0000000000000000000604 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6VXP2ZNFJU;
+				ENABLE_PREVIEWS = YES;
+				CODE_SIGN_ENTITLEMENTS = Chromic/Chromic.entitlements;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Chromic/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brianellissound.chromic;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1";
+			};
+			name = Debug;
+		};
+		1A0000000000000000000605 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6VXP2ZNFJU;
+				ENABLE_PREVIEWS = YES;
+				CODE_SIGN_ENTITLEMENTS = Chromic/Chromic.entitlements;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Chromic/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brianellissound.chromic;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1A0000000000000000000600 /* Build configuration list for PBXProject "Chromic" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A0000000000000000000602 /* Debug */,
+				1A0000000000000000000603 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1A0000000000000000000601 /* Build configuration list for PBXNativeTarget "Chromic" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A0000000000000000000604 /* Debug */,
+				1A0000000000000000000605 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 1A0000000000000000000100 /* Project object */;
+}

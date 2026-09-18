@@ -27,3 +27,15 @@ android/build/
 android/app/build/
 android/.kotlin/
 __pycache__/
+
+# Chromic fork: raw brand assets from Drive (~150 MB of layers); processed files live in the xcassets
+ios-chromic/design-assets/*
+!ios-chromic/design-assets/README.md
+
+# Android Chromic fork — same machine-local files as android/
+android-chromic/local.properties
+android-chromic/keystore.properties
+android-chromic/.gradle/
+android-chromic/build/
+android-chromic/app/build/
+android-chromic/.kotlin/
