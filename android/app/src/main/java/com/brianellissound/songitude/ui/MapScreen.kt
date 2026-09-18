@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import com.brianellissound.songitude.AppState
 import com.brianellissound.songitude.R
 import com.brianellissound.songitude.audio.RenderEngine
+import com.brianellissound.songitude.data.DownloadPhase
 import com.brianellissound.songitude.model.CoordinateOffset
 import com.brianellissound.songitude.model.DialogueColors
 import com.brianellissound.songitude.location.SongitudeLocationManager
@@ -59,6 +60,7 @@ fun MapScreen(
     val canEnd by app.engine.canEndSession.collectAsState()
     val downloadingId by app.downloadingWalkId.collectAsState()
     val progress by app.downloadProgress.collectAsState()
+    val downloadPhase by app.downloadPhase.collectAsState()
     val showIntro by app.showIntroCard.collectAsState()
     val showFarAway by app.showFarAwayCard.collectAsState()
     val placement by app.placementVersion.collectAsState()
@@ -131,7 +133,7 @@ fun MapScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             GlassCircleButton(onClick = onOpenSettings) {
-                Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                Icon(Icons.Filled.Settings, contentDescription = "Settings", tint = MaterialTheme.colorScheme.primary)
             }
             Spacer(Modifier.weight(1f))
             Surface(
@@ -144,22 +146,25 @@ fun MapScreen(
                     Modifier.height(44.dp).padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    // Tinted like iOS, where the whole button label takes the accent.
                     Text(
                         exp?.displayName ?: "Songitude",
                         style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary,
                         maxLines = 1,
                     )
                     Spacer(Modifier.width(6.dp))
                     Icon(
                         if (exp != null) Icons.Filled.Info else Icons.Filled.KeyboardArrowDown,
                         contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(16.dp),
                     )
                 }
             }
             Spacer(Modifier.weight(1f))
             GlassCircleButton(onClick = onOpenBrowser) {
-                Icon(Icons.Filled.Layers, contentDescription = "Browse soundwalks")
+                Icon(Icons.Filled.Layers, contentDescription = "Browse soundwalks", tint = MaterialTheme.colorScheme.primary)
             }
         }
 
@@ -200,6 +205,7 @@ fun MapScreen(
                         isRunning = isRunning,
                         downloading = downloadingId != null,
                         progress = progress,
+                        phase = downloadPhase,
                     ) {
                         if (showIntro) app.dismissIntroCard()
                         app.togglePlayback()
@@ -284,9 +290,18 @@ private fun SkipButton(delta: Double, live: Boolean, onSkip: (Double) -> Unit) {
 /** The big play/pause. While a walk downloads it shows progress instead — there is nothing to play
  *  until that completes, so the tap is swallowed rather than the button dimmed. */
 @Composable
-private fun PlayButton(isRunning: Boolean, downloading: Boolean, progress: Double, onClick: () -> Unit) {
+private fun PlayButton(
+    isRunning: Boolean,
+    downloading: Boolean,
+    progress: Double,
+    phase: DownloadPhase,
+    onClick: () -> Unit,
+) {
     val fill = if (downloading) Color(0xFF5C6169) else MaterialTheme.colorScheme.primary
-    Box(contentAlignment = Alignment.Center) {
+    // Sized for the ring whether or not it is showing. iOS draws the ring as an overlay, which
+    // takes no layout; here the ring is a sibling, and letting the box grow with it dropped the
+    // whole transport 8 dp the moment a download finished.
+    Box(Modifier.size(100.dp), contentAlignment = Alignment.Center) {
         Surface(
             shape = CircleShape,
             color = fill,
@@ -297,7 +312,7 @@ private fun PlayButton(isRunning: Boolean, downloading: Boolean, progress: Doubl
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 if (downloading) {
                     Text(
-                        "Downloading",
+                        if (phase == DownloadPhase.PREPARING) "Preparing" else "Downloading",
                         color = Color.White,
                         fontSize = 13.sp,
                         maxLines = 1,

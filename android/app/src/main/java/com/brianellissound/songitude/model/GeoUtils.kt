@@ -3,6 +3,7 @@ package com.brianellissound.songitude.model
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.max
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -53,6 +54,23 @@ object GeoUtils {
                 if (c == null || r == null) false else distance(offset.apply(c), coord) <= r
             }
             ShapeType.POLYGON -> pointInPolygon(coord, shape.ringCoords.map { offset.apply(it) })
+        }
+
+    /** Metres from [coord] to the nearest point of [shape]'s boundary, 0 inside. What the engine's
+     *  residency and the download warm-up both order by. */
+    fun boundaryDistance(shape: SoundShape, coord: LatLngD, offset: CoordinateOffset): Double =
+        when (shape.type) {
+            ShapeType.CIRCLE -> {
+                val c = shape.centerCoord; val r = shape.radius
+                if (c == null || r == null) Double.MAX_VALUE
+                else max(0.0, distance(offset.apply(c), coord) - r)
+            }
+            ShapeType.POLYGON -> {
+                val ring = shape.ringCoords.map { offset.apply(it) }
+                if (ring.size < 3) Double.MAX_VALUE
+                else if (pointInPolygon(coord, ring)) 0.0
+                else ring.minOfOrNull { distance(it, coord) } ?: Double.MAX_VALUE
+            }
         }
 
     /** How far into a circle the listener is, 0 at the centre and 1 at the edge. Used for falloff. */

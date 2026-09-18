@@ -1363,6 +1363,9 @@
       if (f) assignAudio(s, f); else toast("That doesn't look like an audio file.", "err");
     };
     card.append(dz);
+    // Not a block, just a nudge: one 107 MB WAV made a walk take minutes to arrive on a phone.
+    const big = s.audioFile && bigAudioNote(s.audioFile);
+    if (big) card.append(el("div", "file-warning", big));
 
     // mode selector (dropdown)
     const modeRow = el("div", "params");
@@ -1530,6 +1533,18 @@
     input.type = "file"; input.accept = "audio/*";
     input.onchange = () => { if (input.files[0]) assignAudio(s, input.files[0]); };
     input.click();
+  }
+
+  const BIG_AUDIO_BYTES = 50 * 1024 * 1024;
+  /** A warning line for a clip over 50 MB, or null. Files that came in from a zip are in the store
+   *  too, so imported walks get the same note. */
+  function bigAudioNote(name) {
+    const entry = audioStore.get(name);
+    const size = entry && entry.blob && entry.blob.size;
+    if (!size || size < BIG_AUDIO_BYTES) return null;
+    const mb = Math.round(size / 1024 / 1024);
+    return `This file is ${mb} MB. If it can be saved as an MP3 or another compressed format, ` +
+           `downloads will be much faster for listeners.`;
   }
 
   // A shape still carrying its auto-assigned "Area N" name (vs. one the author has renamed).
@@ -2416,6 +2431,13 @@
       $(id + "Dl").hidden = !has;
       $(id + "Clear").hidden = !has;
       if (has) { $(id + "Name").textContent = name; $(id + "Gain").value = state[id + "Gain"]; }
+      // Same size nudge as the per-area dropzone; the note sits under the picker row.
+      let warn = $(id + "Pick").parentElement.querySelector(".file-warning");
+      const big = has && bigAudioNote(name);
+      if (big) {
+        if (!warn) { warn = el("div", "file-warning"); $(id + "Pick").parentElement.append(warn); }
+        warn.textContent = big;
+      } else if (warn) warn.remove();
     }
     updateListenActions();
   }

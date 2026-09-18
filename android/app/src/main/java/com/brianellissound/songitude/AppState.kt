@@ -5,9 +5,11 @@ import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.brianellissound.songitude.audio.AudioDecoder
 import com.brianellissound.songitude.audio.RenderEngine
 import com.brianellissound.songitude.data.ArtistProfile
 import com.brianellissound.songitude.data.CatalogService
+import com.brianellissound.songitude.data.DownloadPhase
 import com.brianellissound.songitude.data.ExperienceLibrary
 import com.brianellissound.songitude.data.RemoteWalk
 import com.brianellissound.songitude.data.WalkDownloader
@@ -16,14 +18,23 @@ import com.brianellissound.songitude.model.CoordinateOffset
 import com.brianellissound.songitude.model.Experience
 import com.brianellissound.songitude.model.GeoUtils
 import com.brianellissound.songitude.model.LatLngD
+import com.brianellissound.songitude.model.PlaybackMode
 import com.brianellissound.songitude.model.WalkTransposition
 import com.brianellissound.songitude.model.transposed
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 
 /** How the app renders light/dark. Defaults to following the phone. */
 enum class AppAppearance(val key: String, val label: String) {
@@ -101,6 +112,9 @@ class AppState(app: Application) : AndroidViewModel(app) {
 
     private val _downloadProgress = MutableStateFlow(0.0)
     val downloadProgress: StateFlow<Double> = _downloadProgress.asStateFlow()
+    /** Downloading, or decoding what was downloaded — the ring is the same, the word under it isn't. */
+    private val _downloadPhase = MutableStateFlow(DownloadPhase.DOWNLOADING)
+    val downloadPhase: StateFlow<DownloadPhase> = _downloadPhase.asStateFlow()
 
     private val _catalogError = MutableStateFlow<String?>(null)
     val catalogError: StateFlow<String?> = _catalogError.asStateFlow()
@@ -411,15 +425,17 @@ class AppState(app: Application) : AndroidViewModel(app) {
         // downloader, which rewrites map.json and fetches anything missing.
         if (downloader.isUpToDate(walk)) {
             downloader.cachedExperience(walk.id)?.let { exp ->
-                _downloadingWalkId.value = null
-                setCurrent(exp)
-                presentIntroCard()
+                // Usually instant — the PCM is still on disk — but a walk whose warm-up was
+                // interrupted goes through the same underfoot-first preparation as a fresh one.
+                showWalkShell(exp)
+                prepareAndLoad(exp)
                 return
             }
         }
         val previous = _current.value
         _downloadingWalkId.value = walk.id
         _downloadProgress.value = 0.0
+        _downloadPhase.value = DownloadPhase.DOWNLOADING
         _catalogError.value = null
 
         downloadJob?.cancel()
@@ -437,14 +453,101 @@ class AppState(app: Application) : AndroidViewModel(app) {
             refreshDownloadedIds()            // the files landed either way
             // Superseded: the listener has opened something else since. Leave their view alone.
             if (activeWalkRequest != walk.id) return@launch
-            _downloadingWalkId.value = null
             result.fold(
-                onSuccess = { exp -> setCurrent(exp) },   // now the audio exists → load the engine
+                onSuccess = { exp -> prepareAndLoad(exp) },   // the files exist → decode what's underfoot, then play
                 onFailure = { e ->
+                    _downloadingWalkId.value = null
                     _catalogError.value = "Download failed: ${e.message ?: "unknown error"}"
                     if (previous != null) setCurrent(previous) else _current.value = null
                 },
             )
+        }
+    }
+
+    // MARK: - Preparing audio
+
+    private var warmupJob: Job? = null
+
+    /**
+     * Decode what the listener needs *right now*, make the walk playable, then decode the rest.
+     *
+     * iOS has no such step: AVAudioFile decodes a clip faster than anyone notices. MediaCodec on a
+     * mid-range phone does not — Magic Square's twelve clips took eighty seconds — and doing that at
+     * play time was silence with no explanation, while doing all of it before play was a minute of
+     * "Preparing" for areas the listener might never reach. So the ring waits only for the clips
+     * that would have to sound the instant play is pressed: every area they are standing in, the
+     * intro, and every synced loop (those launch together or not at all). Then the walk loads and
+     * the play button is live, and everything else decodes behind it, nearest first, at background
+     * priority — the engine's own requests always jump that queue.
+     *
+     * With no position known there is nothing to call underfoot, so the walk is playable at once
+     * and the warm-up runs in the walk's own order. Anything not yet decoded when play needs it
+     * still decodes lazily, as it always did.
+     */
+    private fun prepareAndLoad(exp: Experience) {
+        warmupJob?.cancel()
+        val requestId = exp.id
+        _downloadingWalkId.value = exp.id          // keeps the ring up on a cached open, too
+        _downloadPhase.value = DownloadPhase.PREPARING
+        _downloadProgress.value = 0.0
+        warmupJob = viewModelScope.launch {
+            val placed = anchoredIfPortable(exp)
+            val here = location.location.value ?: location.lastKnownLocation
+            val pcm = AudioDecoder.pcmDir(getApplication(), exp.id)
+            val shapes = placed.map.shapes
+
+            // Distance from the listener to each clip's nearest area; MAX when we have no idea.
+            val distance = HashMap<String, Double>()
+            for (s in shapes) {
+                val f = s.audioFile?.takeIf { it.isNotEmpty() } ?: continue
+                val d = if (here == null) Double.MAX_VALUE
+                        else GeoUtils.boundaryDistance(s, here, CoordinateOffset.NONE)
+                distance[f] = minOf(distance[f] ?: Double.MAX_VALUE, d)
+            }
+            val synced = shapes.filter { it.mode == PlaybackMode.SYNCED_LOOP }.mapNotNull { it.audioFile }.toSet()
+            val intro = placed.map.intro?.takeIf { it.isNotEmpty() }
+            val exit = placed.map.exit?.takeIf { it.isNotEmpty() }
+
+            val now = LinkedHashSet<String>()
+            intro?.let { now.add(it) }
+            now.addAll(synced)
+            if (here != null) distance.filterValues { it <= 0.0 }.keys.forEach { now.add(it) }
+            val later = (distance.keys + listOfNotNull(exit)).filter { it !in now }
+                .sortedBy { distance[it] ?: Double.MAX_VALUE }
+
+            fun file(name: String) = placed.audioFile(name)
+            val pending = now.filter { file(it).exists() && !AudioDecoder.isDecoded(file(it), pcm) }
+            if (pending.isNotEmpty()) {
+                var done = 0
+                coroutineScope {
+                    pending.map { f ->
+                        async(Dispatchers.IO) {
+                            AudioDecoder.decodeGated(file(f), pcm, urgent = true)
+                            withContext(Dispatchers.Main) {
+                                done++
+                                if (activeWalkRequest == requestId) _downloadProgress.value = done.toDouble() / pending.size
+                            }
+                        }
+                    }.awaitAll()
+                }
+            }
+            if (activeWalkRequest != requestId) return@launch
+            _downloadingWalkId.value = null
+            setCurrent(exp)
+
+            // The rest, nearest first, two at a time, yielding to anything the engine asks for.
+            val gate = Semaphore(2)
+            coroutineScope {
+                later.map { f ->
+                    async(Dispatchers.IO) {
+                        gate.withPermit {
+                            if (!isActive) return@withPermit
+                            val src = file(f)
+                            if (src.exists()) AudioDecoder.decodeGated(src, pcm, urgent = false)
+                        }
+                    }
+                }.awaitAll()
+            }
         }
     }
 

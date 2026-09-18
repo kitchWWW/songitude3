@@ -107,7 +107,7 @@ class RenderEngine(private val context: Context) {
 
     /** Where decoded PCM is kept for the loaded walk. Cleared with the walk, so a deleted walk
      *  doesn't leave hundreds of megabytes of raw audio behind. */
-    private fun pcmDir(): File = File(File(context.cacheDir, "pcm"), experience?.id ?: "none")
+    private fun pcmDir(): File = AudioDecoder.pcmDir(context, experience?.id ?: "none")
 
     // Residency thresholds (metres from a region's boundary). Hysteresis: decode within preload,
     // keep until beyond evict — so pacing back and forth over a line doesn't thrash.
@@ -200,6 +200,8 @@ class RenderEngine(private val context: Context) {
         private const val DONE_DELAY_MS = 30_000L
         /** Residency is re-decided about once a second, regardless of the location tick rate. */
         private const val RESIDENCY_INTERVAL_MS = 1000L
+        /** Within this many metres of an area, its clip decodes ahead of everything else queued. */
+        private const val URGENT_DISTANCE = 30.0
         const val INTRO_GATE_KEY_PREFIX = "songitude.intro."
         fun introGateKey(walkId: String) = INTRO_GATE_KEY_PREFIX + walkId
         /** Holds `dialoguePlaying` while the intro narration runs. It is not a shape id, so every
@@ -676,7 +678,8 @@ class RenderEngine(private val context: Context) {
             val d = if (synced.contains(file)) 0.0 else fileDistance(file, coord)
             val cached = synchronized(lock) { bufferCache[file] }
             if (cached == null) {
-                if (!loadingFiles.contains(file) && d <= preloadDistance) loadFile(file)
+                // Underfoot, or about to be, jumps the decode queue; a clip 200 m off waits its turn.
+                if (!loadingFiles.contains(file) && d <= preloadDistance) loadFile(file, urgent = d <= URGENT_DISTANCE)
             } else if (!synced.contains(file) && d > evictDistance && !fileInUse(file)) {
                 evict(file)
             }
@@ -697,27 +700,34 @@ class RenderEngine(private val context: Context) {
     }
 
     /** Bring memory back under the ceiling by dropping the furthest clips that nothing is using.
-     *  Synced loops are never dropped: they have to stay resident to hold sync. */
+     *  Synced loops are never dropped: they have to stay resident to hold sync. Nor is anything
+     *  within preload range: a clip there may have decoded a moment ago and not yet started — the
+     *  next location tick is what starts it — and dropping it here meant residency re-requested it,
+     *  this dropped it again, and the area never sounded. The budget is soft; being over it by what
+     *  is underfoot is the intended state. */
     private fun enforcePcmBudget() {
         if (pcmBytes <= pcmBudgetBytes) return
         val here = lastCoord ?: return
         val synced = syncedFileSet()
         val candidates = synchronized(lock) { bufferCache.keys.toList() }
             .filter { it !in synced && !fileInUse(it) }
-            .sortedByDescending { fileDistance(it, here) }
+            .map { it to fileDistance(it, here) }
+            .filter { (_, d) -> d > preloadDistance }
+            .sortedByDescending { (_, d) -> d }
+            .map { (file, _) -> file }
         for (file in candidates) {
             if (pcmBytes <= pcmBudgetBytes) return
             evict(file)
         }
     }
 
-    private fun loadFile(file: String) {
+    private fun loadFile(file: String, urgent: Boolean = true) {
         val exp = experience ?: return
         loadingFiles.add(file)
         val token = loadToken
         val target = exp.audioFile(file)
         io.launch {
-            val buf = AudioDecoder.decode(target, pcmDir())
+            val buf = AudioDecoder.decodeGated(target, pcmDir(), urgent)
             main.post {
                 if (token != loadToken) return@post
                 loadingFiles.remove(file)
@@ -789,19 +799,8 @@ class RenderEngine(private val context: Context) {
         return best
     }
 
-    private fun regionDistance(shape: SoundShape, coord: LatLngD): Double = when (shape.type) {
-        ShapeType.CIRCLE -> {
-            val c = shape.centerCoord; val r = shape.radius
-            if (c == null || r == null) Double.MAX_VALUE
-            else max(0.0, GeoUtils.distance(offset.apply(c), coord) - r)
-        }
-        ShapeType.POLYGON -> {
-            val ring = shape.ringCoords.map { offset.apply(it) }
-            if (ring.size < 3) Double.MAX_VALUE
-            else if (GeoUtils.pointInPolygon(coord, ring)) 0.0
-            else ring.minOfOrNull { GeoUtils.distance(it, coord) } ?: Double.MAX_VALUE
-        }
-    }
+    private fun regionDistance(shape: SoundShape, coord: LatLngD): Double =
+        GeoUtils.boundaryDistance(shape, coord, offset)
 
     /** True if a playing voice uses [file], so it must not be evicted. */
     private fun fileInUse(file: String): Boolean {

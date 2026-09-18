@@ -12,7 +12,9 @@ import androidx.core.view.WindowCompat
 import com.brianellissound.songitude.AppAppearance
 
 /** Songitude is black-and-white with one accent blue, matching the iOS rebrand. */
-private val Accent = Color(0xFF2E6BFF)
+// The same blue as the iOS AccentColor asset (sRGB 0.357, 0.549, 1.0): the play button, links and
+// the top-bar tint have to read as one app across the two.
+private val Accent = Color(0xFF5B8CFF)
 
 private val Light = lightColorScheme(
     primary = Accent,

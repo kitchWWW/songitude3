@@ -1,6 +1,10 @@
 package com.brianellissound.songitude.data
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import com.brianellissound.songitude.audio.AudioDecoder
 import com.brianellissound.songitude.audio.RenderEngine
 import com.brianellissound.songitude.model.Experience
 import com.brianellissound.songitude.model.GeoUtils
@@ -14,9 +18,10 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.serialization.Serializable
 import java.io.File
+import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -126,7 +131,42 @@ object CatalogService {
             java.util.zip.GZIPInputStream(raw.inputStream()).use { it.readBytes() }
         } else raw
     }
+
+    /**
+     * Fetch straight to [dest], reporting each chunk's size to [onBytes].
+     *
+     * [httpGet] returns a ByteArray, which is fine for a manifest and fatal for a clip: one walk
+     * carries a 107 MB WAV, and holding that in a byte[] on a 256 MB heap — with three other
+     * downloads in flight — is an OutOfMemoryError waiting for a slightly smaller phone. Audio is
+     * already compressed, so gzip is not requested; that also keeps Content-Length honest.
+     */
+    fun httpGetToFile(urlString: String, dest: File, onBytes: (Long) -> Unit) {
+        val conn = (URL(urlString).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 20_000
+            readTimeout = 60_000
+            setRequestProperty("Accept-Encoding", "identity")
+        }
+        val code = conn.responseCode
+        if (code != 200) {
+            conn.errorStream?.use { it.readBytes() }
+            throw IllegalStateException("HTTP $code for $urlString")
+        }
+        val buf = ByteArray(64 * 1024)
+        conn.inputStream.use { input ->
+            FileOutputStream(dest).use { out ->
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    out.write(buf, 0, n)
+                    onBytes(n.toLong())
+                }
+            }
+        }
+    }
 }
+
+/** What the ring under the play button is waiting on: the files, or the clips underfoot decoding. */
+enum class DownloadPhase { DOWNLOADING, PREPARING }
 
 /**
  * Downloads a published walk's files into the cache and returns a local [Experience], identical in
@@ -154,6 +194,7 @@ class WalkDownloader(private val context: Context) {
      *  the one-hour gate exists to survive a resume, not a reinstall. */
     fun deleteCache(id: String, engine: RenderEngine?) {
         cacheDir(id).deleteRecursively()
+        AudioDecoder.pcmDir(context, id).deleteRecursively()
         engine?.clearIntroGate(id)
         context.getSharedPreferences("songitude", Context.MODE_PRIVATE)
             .edit().remove(RenderEngine.introGateKey(id)).apply()
@@ -165,6 +206,7 @@ class WalkDownloader(private val context: Context) {
     /** Drop every downloaded walk (Settings → Advanced → Reset app) and every intro gate with them. */
     fun deleteAllCaches() {
         walksRoot().deleteRecursively()
+        File(context.cacheDir, "pcm").deleteRecursively()
         val prefs = context.getSharedPreferences("songitude", Context.MODE_PRIVATE)
         val edit = prefs.edit()
         prefs.all.keys.filter { it.startsWith(RenderEngine.INTRO_GATE_KEY_PREFIX) }.forEach { edit.remove(it) }
@@ -186,8 +228,13 @@ class WalkDownloader(private val context: Context) {
 
     /**
      * Download map.json plus every referenced audio file, album art and label image.
+     *
      * [mapReady] fires as soon as map.json parses — long before the audio arrives — so the UI can
-     * show the right walk immediately instead of sitting on the previous one.
+     * show the right walk immediately instead of sitting on the previous one. [progress] reports a
+     * 0–1 fraction measured in **bytes** against the manifest's size, because measuring it in
+     * files sat at "eleven of twelve" for a minute while the one 107 MB clip came down.
+     *
+     * Decoding is not done here: see [com.brianellissound.songitude.AppState.prepareAndLoad].
      */
     suspend fun download(
         walk: RemoteWalk,
@@ -216,32 +263,55 @@ class WalkDownloader(private val context: Context) {
             // enough to keep the link busy without swamping a phone's radio or S3.
             val list = rels.toList()
             val gate = Semaphore(4)
-            val finished = AtomicInteger(0)
+            // The manifest's size is the whole bundle, so a walk with no size (an old manifest)
+            // falls back to counting files. Already-present files count as received up front.
+            val totalBytes = walk.sizeBytes?.takeIf { it > 0 }
+            val received = AtomicLong(0)
+            val filesDone = AtomicLong(0)
+            val lastReport = AtomicLong(0)
+            val main = Handler(Looper.getMainLooper())
+            // Chunks arrive every few milliseconds from four streams; the ring only needs ~10 Hz.
+            fun report(force: Boolean = false) {
+                val now = SystemClock.uptimeMillis()
+                if (!force && now - lastReport.get() < 100) return
+                lastReport.set(now)
+                val f = if (totalBytes != null) received.get().toDouble() / totalBytes
+                        else filesDone.get().toDouble() / maxOf(1, list.size)
+                main.post { progress(f.coerceIn(0.0, 1.0)) }
+            }
             coroutineScope {
                 list.map { rel ->
                     async {
                         gate.withPermit {
                             val dest = File(dir, rel)
-                            if (!dest.exists()) {
+                            if (dest.exists()) {
+                                received.addAndGet(dest.length())
+                            } else {
                                 dest.parentFile?.mkdirs()
                                 val enc = rel.split("/").joinToString("/") {
                                     URLEncoder.encode(it, "UTF-8").replace("+", "%20")
                                 }
-                                val bytes = CatalogService.httpGet("${walk.base}/$enc")
                                 // Write beside the target and move into place, so an interrupted
                                 // download can never leave a truncated clip that later looks cached.
                                 val tmp = File(dest.parentFile, dest.name + ".part")
-                                tmp.writeBytes(bytes)
-                                if (!tmp.renameTo(dest)) { dest.writeBytes(bytes); tmp.delete() }
+                                try {
+                                    CatalogService.httpGetToFile("${walk.base}/$enc", tmp) { n ->
+                                        received.addAndGet(n); report()
+                                    }
+                                    if (!tmp.renameTo(dest)) { tmp.copyTo(dest, overwrite = true); tmp.delete() }
+                                } catch (t: Throwable) {
+                                    tmp.delete(); throw t
+                                }
                             }
-                            val done = finished.incrementAndGet().toDouble() / maxOf(1, list.size)
-                            withContext(Dispatchers.Main) { progress(done) }
+                            filesDone.incrementAndGet()
+                            report(force = true)
                         }
                     }
                 }.awaitAll()
             }
             File(dir, ".complete").writeBytes(ByteArray(0))
             versionFile(walk.id).writeText(walk.updatedAt ?: "")
+
             Result.success(Experience(walk.id, dir, map))
         } catch (t: Throwable) {
             Result.failure(t)

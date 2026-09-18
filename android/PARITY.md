@@ -29,6 +29,8 @@ bug, a deliberate platform difference, or an approximation. Status is updated as
 | Uninstall is a button with a confirm, not a swipe | A swipe with no visible affordance is an iOS idiom; the button is discoverable and the confirm replaces the swipe's own undo-by-not-completing. |
 | Basemap is a Maps JSON style, not CARTO tiles | Google Maps restyles itself; MapKit cannot, which is why iOS ships raster tiles. |
 | Engine lives on the `Application` | An Activity-scoped engine would be silenced by a rotation. |
+| Audio is decoded to PCM **at download time** ("Preparing" phase), not at play | iOS decodes at play, when proximity asks for a clip, and `AVAudioFile` is fast enough that nobody notices. `MediaCodec` on a mid-range phone takes tens of seconds for a walk like Magic Square (150 MB, one 107 MB WAV), and doing that at play was silence with no explanation. Decoding is also capped at two clips at once — twelve concurrent codec instances is more than a mid-range chip's pool. Play still decodes lazily if the warm-up was interrupted. |
+| Download progress is measured in bytes, against the manifest's `sizeBytes` | iOS counts files. With one clip that is 70% of the walk, counting files sat at "eleven of twelve" for a minute; bytes are what the listener is actually waiting for. |
 
 ## C. Approximations — acceptable, worth knowing
 

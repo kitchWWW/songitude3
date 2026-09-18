@@ -241,6 +241,7 @@ body.listening #sidePane { display: none; }
 .dropzone.dragover { border-color: var(--accent); background: rgba(47,107,255,.10); color: var(--text); }
 .dropzone.has-audio { border-style: solid; color: var(--text); background: #fff; }
 .dropzone .file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-warning { margin-top: 4px; font-size: 12px; line-height: 1.35; color: var(--danger); }
 .dropzone .preview-btn { border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 4px 8px; }
 
 .mode-row { display: flex; gap: 6px; }
