@@ -18,7 +18,9 @@ clockwise one (**››15, forward**).
 
 | Drive path | Files | Use in app |
 |---|---|---|
-| `App Icon/CD TP Flavicon.png` | the toy-piano favicon, 2261×2644 opaque | **AppIcon** — done: full-width square crop centred on the piano (top offset 74), 1024², no alpha |
+| `App Icon/Icon Small.png` | the toy piano over the watercolor sky, 1702×1696 (the wash is partly translucent) | **AppIcon** — done 2026-09-22: centre-cropped square, flattened onto white, 1024² no alpha. Also regenerates `AppLogo`, `IconTile` (first-run location ask), Android `icon_tile` and the adaptive launcher (foreground = tile at 62%, background = the same picture blurred), and `web/chromic/` icons |
+| `App Icon/Icon Large.png` | same art, larger piano | not used |
+| `App Icon/CD TP Flavicon.png` | the toy-piano favicon, 2261×2644 opaque | superseded by Icon Small |
 | `App Icon/Logo 1.png … Logo10.png` | ten candidates | not used (awaiting Lucy; superseded by the favicon) |
 | `Background/Combined Background`, `Layer 1–5` | full-bleed background + its layers | **done** — `Backdrop` behind Home and the walk page |
 | `Background/TrBk - Combined Background`, `TrBk - Layer 1–5` | same, transparent | **done** — `TrBk - Layer 1–5` → `Wash1–5` imagesets (1032px PNG), swaying in `LivingBackdrop` over the still wash |

@@ -1,24 +1,24 @@
 {
  "version": 1,
- "generatedAt": "2026-09-10T01:41:47.265Z",
+ "generatedAt": "2026-09-23T03:50:17.048Z",
  "walks": [
   {
    "id": "garden-of-memories-7cf9a10a",
-   "name": "Garden of Memories",
+   "name": "Shimmers in the Field",
    "creator": "chromic duo",
-   "about": "Garden of Memories is an immersive AR soundwalk commissioned by Washington Performing Arts and Tregaron Conservancy, with support from the DC Commission on the Arts and Humanities. Bringing together site-specific stories, music, field recordings, and sound design, the work invites visitors to wander the Conservancy\u2019s trails while discovering a hidden layer of stories and sounds connected to the landscape.\n\nInspired by the ways places become intertwined with the people and memories we carry, Garden of Memories explores how stories can transform a landscape into something deeply personal. A conversation shared on a familiar path, a loved one remembered through a daily walk, a place of comfort or solitude\u2014these moments become part of the landscapes we inhabit. Alongside personal stories are tales drawn from folklore and music inspired by seasons, inviting visitors to reflection and encouraging them to slow down, listen closely, and make space for their own memories and questions. \n\nTake a walk through the Tregaron Conservancy, into a journey through the stories held within a landscape, and the memories it awakens within us.",
+   "about": "Shimmers in the Field is an immersive AR soundwalk commissioned by Washington Performing Arts and Tregaron Conservancy, with support from the DC Commission on the Arts and Humanities. Bringing together site-specific stories, music, field recordings, and sound design, the work invites visitors to wander the Conservancy\u2019s trails while discovering a hidden layer of stories and sounds connected to the landscape.\n\nInspired by the ways places become intertwined with the people and memories we carry, Garden of Memories explores how stories can transform a landscape into something deeply personal. A conversation shared on a familiar path, a loved one remembered through a daily walk, a place of comfort or solitude\u2014these moments become part of the landscapes we inhabit. Alongside personal stories are tales drawn from folklore and music inspired by seasons, inviting visitors to reflection and encouraging them to slow down, listen closely, and make space for their own memories and questions. \n\nTake a walk through the Tregaron Conservancy, into a journey through the stories held within a landscape, and the memories it awakens within us.",
    "artistId": "80cda9dee7513416",
    "artUrl": "https://songitude-walks.s3.amazonaws.com/walks/garden-of-memories-7cf9a10a/IMG_4390.jpg",
    "portable": false,
    "center": [
-    38.93163900447185,
-    -77.05970406532289
+    38.93223573534926,
+    -77.06024050712587
    ],
    "zoom": 18,
-   "shapeCount": 9,
+   "shapeCount": 10,
    "owner": "chromic.duo@gmail.com",
-   "updatedAt": "2026-09-02T18:53:24.227Z",
-   "sizeBytes": 42560893,
+   "updatedAt": "2026-09-23T03:49:45.415Z",
+   "sizeBytes": 43771388,
    "base": "https://songitude-walks.s3.amazonaws.com/walks/garden-of-memories-7cf9a10a",
    "mapUrl": "https://songitude-walks.s3.amazonaws.com/walks/garden-of-memories-7cf9a10a/map.json",
    "zipUrl": "https://songitude-walks.s3.amazonaws.com/walks/garden-of-memories-7cf9a10a/bundle.zip"
