@@ -187,10 +187,23 @@ enum WalkDownloader {
 
     /// Drop every downloaded walk (used by Settings → Advanced → Reset app), and every intro gate
     /// with them, for the same reason deleteCache clears one.
+    /// The first launch of every new build starts with no downloaded walks and an empty URLCache.
+    /// Installing over an older build keeps both, and an older build could have cached a walk
+    /// file that has since been fixed on the server (see `fetch`). A fresh install counts too: the
+    /// stored build is simply absent. Rebuilding the same build number in Xcode doesn't trigger it.
+    static func clearCachesIfNewBuild() {
+        let key = "cachesClearedForBuild"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
+        guard UserDefaults.standard.string(forKey: key) != build else { return }
+        deleteAllCaches()
+        UserDefaults.standard.set(build, forKey: key)
+    }
+
     static func deleteAllCaches() {
         let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("walks", isDirectory: true)
         try? FileManager.default.removeItem(at: root)
+        URLCache.shared.removeAllCachedResponses()   // responses cached before fetch() opted out
         let defaults = UserDefaults.standard
         for key in defaults.dictionaryRepresentation().keys
         where key.hasPrefix(RenderEngine.introGateKeyPrefix) {
@@ -235,13 +248,16 @@ enum WalkDownloader {
                 let list = Array(rels)
                 for (i, rel) in list.enumerated() {
                     let dest = dir.appendingPathComponent(rel)
-                    if !FileManager.default.fileExists(atPath: dest.path) {
+                    // A clip already on disk is reused (a new clip means a new name). Everything
+                    // else is fetched again, since an edited cover or label image keeps its name.
+                    let isAudio = rel.hasPrefix("audio/")
+                    if !isAudio || !FileManager.default.fileExists(atPath: dest.path) {
                         try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(),
                                                                 withIntermediateDirectories: true)
                         let enc = rel.split(separator: "/").map {
                             $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0)
                         }.joined(separator: "/")
-                        let data = try fetch(walk.base + "/" + enc)
+                        let data = try fetch(walk.base + "/" + enc, cached: isAudio)
                         try data.write(to: dest)
                     }
                     let done = Double(i + 1) / Double(max(1, list.count))
@@ -259,12 +275,20 @@ enum WalkDownloader {
 
     /// Synchronous download-to-memory (called on a background queue). Streams via URLSession to
     /// avoid holding the whole response before we get it; fine for audio-sized files.
-    private static func fetch(_ urlString: String) throws -> Data {
+    ///
+    /// `cached: false` skips URLCache. S3 sends no Cache-Control, so URLSession guesses a freshness
+    /// window from Last-Modified, and a walk republished in place (same URLs) came back as the old
+    /// map.json even though `updatedAt` had already said to re-download. Only audio may be cached:
+    /// replacing a clip in the editor gives it a new file name, so a stale copy is never asked for.
+    /// map.json, album art and label images keep their names when edited, so they always go to S3.
+    private static func fetch(_ urlString: String, cached: Bool = false) throws -> Data {
         guard let url = URL(string: urlString) else { throw URLError(.badURL) }
         var result: Data?
         var thrown: Error?
         let sem = DispatchSemaphore(value: 0)
-        URLSession.shared.dataTask(with: url) { data, resp, err in
+        var req = URLRequest(url: url)
+        if !cached { req.cachePolicy = .reloadIgnoringLocalCacheData }
+        URLSession.shared.dataTask(with: req) { data, resp, err in
             if let err = err { thrown = err }
             else if let http = resp as? HTTPURLResponse, http.statusCode != 200 {
                 thrown = URLError(.init(rawValue: URLError.badServerResponse.rawValue))

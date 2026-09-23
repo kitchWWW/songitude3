@@ -2,6 +2,7 @@ package com.brianellissound.songitude
 
 import android.app.Application
 import com.brianellissound.songitude.audio.RenderEngine
+import com.brianellissound.songitude.data.WalkDownloader
 import com.brianellissound.songitude.location.SongitudeLocationManager
 import com.brianellissound.songitude.model.Experience
 import com.brianellissound.songitude.service.PlaybackService
@@ -36,6 +37,7 @@ class SongitudeApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        WalkDownloader(this).clearCachesIfNewBuild()   // before anything can load a downloaded walk
         PlaybackService.createChannel(this)
         // Playback starting or stopping is what starts and stops the foreground service, wherever
         // the transport was driven from — the button, the notification, or a headphone unplug.

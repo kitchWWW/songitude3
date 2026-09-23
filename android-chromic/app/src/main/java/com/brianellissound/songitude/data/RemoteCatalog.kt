@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import com.brianellissound.songitude.BuildConfig
 import com.brianellissound.songitude.audio.AudioDecoder
 import com.brianellissound.songitude.audio.RenderEngine
 import com.brianellissound.songitude.model.Experience
@@ -105,9 +106,9 @@ object CatalogService {
     }
 
     /**
-     * One GET. [noCache] is for the manifest and artist profiles, which are republished in place and
-     * whose stale copies are wrong in ways that matter; a walk's own files are immutable once
-     * published, so they are happily cached.
+     * One GET. [noCache] is for everything republished in place under the same name: the manifest,
+     * artist profiles, a walk's map.json, album art and label images. Only audio may be cached,
+     * because replacing a clip in the editor gives it a new file name.
      *
      * Deliberately does NOT call `disconnect()`. That tears down the socket and defeats keep-alive,
      * and a walk can be eighty-odd clips — an extra TCP and TLS handshake each was the difference
@@ -140,11 +141,12 @@ object CatalogService {
      * downloads in flight — is an OutOfMemoryError waiting for a slightly smaller phone. Audio is
      * already compressed, so gzip is not requested; that also keeps Content-Length honest.
      */
-    fun httpGetToFile(urlString: String, dest: File, onBytes: (Long) -> Unit) {
+    fun httpGetToFile(urlString: String, dest: File, noCache: Boolean = false, onBytes: (Long) -> Unit) {
         val conn = (URL(urlString).openConnection() as HttpURLConnection).apply {
             connectTimeout = 20_000
             readTimeout = 60_000
             setRequestProperty("Accept-Encoding", "identity")
+            if (noCache) setRequestProperty("Cache-Control", "no-cache")
         }
         val code = conn.responseCode
         if (code != 200) {
@@ -172,6 +174,8 @@ enum class DownloadPhase { DOWNLOADING, PREPARING }
  * Downloads a published walk's files into the cache and returns a local [Experience], identical in
  * shape to a bundled one so the audio engine needs no changes.
  */
+private const val CACHES_CLEARED_KEY = "cachesClearedForBuild"
+
 class WalkDownloader(private val context: Context) {
 
     private fun walksRoot(): File = File(context.cacheDir, "walks")
@@ -202,6 +206,21 @@ class WalkDownloader(private val context: Context) {
 
     fun downloadedIds(): Set<String> =
         (walksRoot().listFiles() ?: emptyArray()).map { it.name }.filter { isDownloaded(it) }.toSet()
+
+    /**
+     * The first launch of every new build starts with no downloaded walks. Installing over an older
+     * build keeps them, and an older build could have saved a walk file that has since been fixed on
+     * the server. A fresh install counts too: the stored version is simply absent. Called from
+     * [com.brianellissound.songitude.SongitudeApp.onCreate], once per process and before anything
+     * can load a walk. AppState is too late, since it is rebuilt mid-walk when the Activity is.
+     */
+    fun clearCachesIfNewBuild() {
+        val prefs = context.getSharedPreferences("songitude", Context.MODE_PRIVATE)
+        val build = BuildConfig.VERSION_CODE
+        if (prefs.getInt(CACHES_CLEARED_KEY, -1) == build) return
+        deleteAllCaches()
+        prefs.edit().putInt(CACHES_CLEARED_KEY, build).apply()
+    }
 
     /** Drop every downloaded walk (Settings → Advanced → Reset app) and every intro gate with them. */
     fun deleteAllCaches() {
@@ -284,7 +303,10 @@ class WalkDownloader(private val context: Context) {
                     async {
                         gate.withPermit {
                             val dest = File(dir, rel)
-                            if (dest.exists()) {
+                            // A clip already on disk is reused (a new clip means a new name).
+                            // Everything else is fetched again: an edited cover keeps its name.
+                            val isAudio = rel.startsWith("audio/")
+                            if (isAudio && dest.exists()) {
                                 received.addAndGet(dest.length())
                             } else {
                                 dest.parentFile?.mkdirs()
@@ -295,7 +317,7 @@ class WalkDownloader(private val context: Context) {
                                 // download can never leave a truncated clip that later looks cached.
                                 val tmp = File(dest.parentFile, dest.name + ".part")
                                 try {
-                                    CatalogService.httpGetToFile("${walk.base}/$enc", tmp) { n ->
+                                    CatalogService.httpGetToFile("${walk.base}/$enc", tmp, noCache = !isAudio) { n ->
                                         received.addAndGet(n); report()
                                     }
                                     if (!tmp.renameTo(dest)) { tmp.copyTo(dest, overwrite = true); tmp.delete() }

@@ -97,6 +97,7 @@ final class AppState: ObservableObject {
     var isOpeningWalk: Bool { pendingWalkId != nil || activeWalkRequest != nil }
 
     init() {
+        WalkDownloader.clearCachesIfNewBuild()   // before anything can load a downloaded walk
         hasOnboarded = UserDefaults.standard.bool(forKey: onboardKey)
         appearance = AppAppearance(rawValue: UserDefaults.standard.string(forKey: appearanceKey) ?? "")
             ?? .system
@@ -423,6 +424,16 @@ final class AppState: ObservableObject {
                 engine.stop(); location.stop(); stopSlew()   // releases the players holding that audio
             }
         }
+    }
+
+    /// Throw away every downloaded walk and every cached download, keeping preferences and
+    /// onboarding. For a walk that keeps coming back broken after it was fixed on the server: the
+    /// next open downloads it fresh. Each walk goes through `deleteDownloaded`, so a loaded one is
+    /// unloaded rather than left pointing at deleted audio.
+    func resetCache() {
+        for id in WalkDownloader.downloadedIds() { deleteDownloaded(id) }
+        WalkDownloader.deleteAllCaches()     // partial downloads, URLCache, intro gates
+        refreshCatalog()
     }
 
     // MARK: - Deep link (open a specific walk as the default)

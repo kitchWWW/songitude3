@@ -625,6 +625,19 @@ class AppState(app: Application) : AndroidViewModel(app) {
         refreshDownloadedIds()
     }
 
+    /**
+     * Throw away every downloaded walk and its decoded audio, keeping preferences and onboarding
+     * (Settings → Advanced → Reset Cache). For a walk that keeps coming back broken after it was
+     * fixed on the server: the next open downloads it fresh. Each walk goes through
+     * [deleteDownloaded], so a loaded one is unloaded rather than left pointing at deleted files.
+     */
+    fun resetCache() {
+        downloader.downloadedIds().forEach { deleteDownloaded(it) }
+        downloader.deleteAllCaches()     // partial downloads, decoded PCM, intro gates
+        refreshDownloadedIds()
+        refreshCatalog()
+    }
+
     // MARK: - Deep link
 
     fun handleDeepLink(uri: Uri) {

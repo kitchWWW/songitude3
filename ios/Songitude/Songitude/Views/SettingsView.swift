@@ -7,6 +7,7 @@ struct SettingsView: View {
     @EnvironmentObject var app: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var confirmReset = false
+    @State private var confirmCacheReset = false
     @State private var reporting: ReportKind?
 
     var body: some View {
@@ -26,6 +27,13 @@ struct SettingsView: View {
             }
             .sheet(item: $reporting) { kind in
                 ReportView(kind: kind).environmentObject(app)
+            }
+            .alert("Reset Cache?", isPresented: $confirmCacheReset) {
+                Button("Reset", role: .destructive) { app.resetCache() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Deletes every downloaded walk so each one downloads fresh next time you open "
+                     + "it. Your settings stay as they are.")
             }
             .alert("Reset App?", isPresented: $confirmReset) {
                 Button("Reset", role: .destructive) { app.resetEverything(); dismiss() }
@@ -114,6 +122,7 @@ struct SettingsView: View {
                 }
                 Button("Upgrade to “Always” location") { app.location.requestAlways() }
                 Button("Reload walk catalog") { app.refreshCatalog() }
+                Button("Reset Cache", role: .destructive) { confirmCacheReset = true }
                 Button("Reset App", role: .destructive) { confirmReset = true }
             }
         }

@@ -33,6 +33,7 @@ fun SettingsScreen(app: AppState, onClose: () -> Unit) {
 
     var showDebug by remember { mutableStateOf(false) }
     var confirmReset by remember { mutableStateOf(false) }
+    var confirmCacheReset by remember { mutableStateOf(false) }
     var reporting by remember { mutableStateOf<ReportKind?>(null) }
 
     val walkName = current?.displayName
@@ -143,12 +144,32 @@ fun SettingsScreen(app: AppState, onClose: () -> Unit) {
                     modifier = Modifier.clickable { app.refreshCatalog() },
                 )
                 ListItem(
+                    headlineContent = { Text("Reset Cache", color = MaterialTheme.colorScheme.error) },
+                    modifier = Modifier.clickable { confirmCacheReset = true },
+                )
+                ListItem(
                     headlineContent = { Text("Reset App", color = MaterialTheme.colorScheme.error) },
                     modifier = Modifier.clickable { confirmReset = true },
                 )
             }
             Spacer(Modifier.height(32.dp))
         }
+    }
+
+    if (confirmCacheReset) {
+        AlertDialog(
+            onDismissRequest = { confirmCacheReset = false },
+            title = { Text("Reset cache?") },
+            text = {
+                Text("Deletes every downloaded walk so each one downloads fresh next time you open it. Your settings stay as they are.")
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmCacheReset = false; app.resetCache() }) {
+                    Text("Reset", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmCacheReset = false }) { Text("Cancel") } },
+        )
     }
 
     if (confirmReset) {
