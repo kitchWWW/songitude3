@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chromic Privacy Policy</title>
+  <meta name="description" content="Privacy policy for the Chromic: A World of Stories app." />
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Julius+Sans+One&display=swap" rel="stylesheet" />
+  <style>
+    :root{--ink:#1D1B20;--body:#2b2a30;--muted:#49454F;--card:#FEF7FF;--stroke:#CAC4D0;--accent:#8a5a00}
+    *{box-sizing:border-box}
+    body{margin:0;color:var(--body);line-height:1.65;-webkit-font-smoothing:antialiased;
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+      background:#f7e7d6 url("backdrop.jpg") center top/cover fixed}
+    .wrap{max-width:760px;margin:0 auto;padding:40px 16px 80px}
+    .page{background:rgba(254,247,255,.93);border:1px solid var(--stroke);border-radius:20px;padding:36px 32px}
+    .display{font-family:"Julius Sans One",sans-serif;font-weight:400;text-transform:uppercase}
+    h1{font-size:clamp(28px,6vw,40px);letter-spacing:-.4px;margin:0 0 6px;color:var(--ink);line-height:1.1}
+    .updated{color:var(--muted);font-size:14px;margin:0 0 28px}
+    h2{font-size:19px;margin:32px 0 8px;color:var(--ink)}
+    a{color:var(--accent)}
+    .callout{background:#fff4d6;border:1px solid #f0d58a;border-radius:12px;padding:16px 18px;margin:18px 0}
+    .callout b{color:var(--ink)}
+    .home{display:inline-flex;align-items:center;gap:8px;color:var(--ink);text-decoration:none;font-size:15px;margin-bottom:18px}
+    .home img{width:28px;height:28px;border-radius:7px}
+    footer{margin-top:40px;color:var(--muted);font-size:14px;border-top:1px solid var(--stroke);padding-top:18px}
+    @media(max-width:600px){.page{padding:24px 18px}body{background-attachment:scroll}}
+  </style>
+  <script src="backdrop.js" defer></script>
+</head>
+<body>
+  <div class="wrap">
+    <a class="home" href="index.html"><img src="icon-512.png" alt="" /><span class="display">Chromic</span></a>
+    <div class="page">
+      <h1 class="display">Privacy Policy</h1>
+      <p class="updated">Chromic: A World of Stories · Last updated: September 22, 2026</p>
+
+      <p>Chromic: A World of Stories ("the app") plays soundwalks by the artist Chromic: music and
+        stories placed at real locations, heard through headphones as you walk. The app is built on
+        and run by <a href="https://songitude.com/index.html">Songitude</a>. This policy explains exactly what data is involved.</p>
+
+      <div class="callout">
+        <b>Your location, in plain terms:</b> the app uses your location <b>only</b> to play the
+        right sounds for where you are standing, and to sort the list of walks nearest first. Your
+        location is used in real time on your device. We do <b>not</b> collect it, send it to our
+        servers, store it, log it, sell it or share it.
+      </div>
+
+      <h2>Location data</h2>
+      <p>While a walk plays, the app reads your device's location continuously to decide what you
+        hear. This happens <b>on your device</b>. The list of walks is sorted nearest first, also on
+        your device, using your most recent location. Your location is never sent to Chromic,
+        Songitude or anyone else.</p>
+
+      <h2>Background location</h2>
+      <p>A soundwalk is meant to be heard with the phone locked and in your pocket. So while a walk
+        is <b>playing</b>, the app keeps reading your location with the screen off, for the same
+        single purpose. Location access starts when you press Start and stops when you end the walk,
+        quit the app, or the walk ends. When nothing is playing, the app does not read your location
+        at all.</p>
+      <p>On Android this runs as a foreground service, which is why a notification is shown while a
+        walk plays. That notification holds the lock-screen controls. It is the only notification the
+        app ever shows. We send no alerts, reminders or messages.</p>
+
+      <h2>What we store</h2>
+      <p>Nothing about you. There are no accounts and no sign-in. The app stores the walks you
+        download and your settings on your own device, and nowhere else.</p>
+
+      <h2>Reports you send</h2>
+      <p>If you use <b>Settings → Report</b> to tell us about a problem, the app sends the text you
+        type along with the walk it concerns, the app version and your device model and system version,
+        so we can fix it. Reports carry no name, account, email address, device identifier or
+        location. If you want a reply, include a way to reach you in the message yourself.</p>
+
+      <h2>No tracking or ads</h2>
+      <p>The app contains no advertising, no analytics or tracking SDKs, and no third-party trackers.</p>
+
+      <h2>Third-party services</h2>
+      <ul>
+        <li><b>Amazon Web Services (S3, Lambda)</b>: hosts the walks and artwork the app downloads, and
+          delivers reports you choose to send. It never receives your location.</li>
+        <li><b>Map tiles (OpenStreetMap / CARTO)</b>: draw the map on iPhone. Standard tile requests
+          do not include your precise location.</li>
+        <li><b>Google Maps SDK</b>: draws the map in the Android app. It requests imagery for the
+          area on screen and is governed by
+          <a href="https://policies.google.com/privacy">Google's privacy policy</a>.</li>
+        <li><b>Google Fonts</b>: serves the typeface used on this website.</li>
+        <li><b>Server logs</b>: like any web server, the walk catalog records standard request logs
+          (IP address, file requested, time) when something is downloaded. These are used only to
+          keep the service running and are not linked to you or to your location.</li>
+      </ul>
+
+      <h2>Permissions the app asks for</h2>
+      <ul>
+        <li><b>Location (precise, and in the background)</b>: to play the right sounds for where you
+          are, while a walk is playing. See above.</li>
+        <li><b>Notifications (Android)</b>: only so the playback notification can be shown while a
+          walk plays.</li>
+        <li><b>Network</b>: to download walks. Each walk is downloaded in full before you set off,
+          so nothing streams while you walk.</li>
+      </ul>
+      <p>Every permission can be declined or revoked in your device settings. Without location the
+        app can still show you the walks, but it cannot play them where they belong.</p>
+
+      <h2>Your data, and deleting it</h2>
+      <p>Nothing is stored about you, so there is nothing to delete on our side. Uninstalling the
+        app removes the walks and settings saved on your device.</p>
+
+      <h2>Children</h2>
+      <p>The app is not directed to children under 13 and does not knowingly collect their data.
+        It does not collect anyone's data.</p>
+
+      <h2>Changes</h2>
+      <p>We may update this policy. Material changes will appear here with a new date.</p>
+
+      <h2>Contact</h2>
+      <p>Questions? Email <a href="mailto:brian.e2014@gmail.com">brian.e2014@gmail.com</a>.</p>
+
+      <footer>Chromic: A World of Stories · soundwalks by Chromic · built on Songitude by Brian Ellis</footer>
+    </div>
+  </div>
+</body>
+</html>

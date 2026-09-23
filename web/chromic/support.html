@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Chromic Support</title>
+  <meta name="description" content="Help and contact for the Chromic: A World of Stories app." />
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Julius+Sans+One&display=swap" rel="stylesheet" />
+  <style>
+    :root{--ink:#1D1B20;--body:#2b2a30;--muted:#49454F;--card:#FEF7FF;--stroke:#CAC4D0;--accent:#8a5a00}
+    *{box-sizing:border-box}
+    body{margin:0;color:var(--body);line-height:1.65;-webkit-font-smoothing:antialiased;
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+      background:#f7e7d6 url("backdrop.jpg") center top/cover fixed}
+    .wrap{max-width:760px;margin:0 auto;padding:40px 16px 80px}
+    .page{background:rgba(254,247,255,.93);border:1px solid var(--stroke);border-radius:20px;padding:36px 32px}
+    .display{font-family:"Julius Sans One",sans-serif;font-weight:400;text-transform:uppercase}
+    h1{font-size:clamp(28px,6vw,40px);letter-spacing:-.4px;margin:0 0 6px;color:var(--ink);line-height:1.1}
+    .updated{color:var(--muted);font-size:14px;margin:0 0 28px}
+    h2{font-size:19px;margin:32px 0 8px;color:var(--ink)}
+    a{color:var(--accent)}
+    .callout{background:#fff4d6;border:1px solid #f0d58a;border-radius:12px;padding:16px 18px;margin:18px 0}
+    .callout b{color:var(--ink)}
+    .faq b{display:block;color:var(--ink);margin-top:18px}
+    ol li,ul li{margin:4px 0}
+    .home{display:inline-flex;align-items:center;gap:8px;color:var(--ink);text-decoration:none;font-size:15px;margin-bottom:18px}
+    .home img{width:28px;height:28px;border-radius:7px}
+    footer{margin-top:40px;color:var(--muted);font-size:14px;border-top:1px solid var(--stroke);padding-top:18px}
+    @media(max-width:600px){.page{padding:24px 18px}body{background-attachment:scroll}}
+  </style>
+  <script src="backdrop.js" defer></script>
+</head>
+<body>
+  <div class="wrap">
+    <a class="home" href="index.html"><img src="icon-512.png" alt="" /><span class="display">Chromic</span></a>
+    <div class="page">
+      <h1 class="display">Support</h1>
+      <p class="updated">Chromic: A World of Stories</p>
+
+      <p>Chromic: A World of Stories plays soundwalks by Chromic: stories, music and sound placed in
+        real landscapes. Put on headphones, go to a walk's location, press Start, and the audio
+        changes as you move.</p>
+
+      <h2>Getting started</h2>
+      <ol>
+        <li>Open the app and allow location when asked. The app uses it only to play the sounds
+          around you, and only while a walk is playing.</li>
+        <li>Tap <b>Soundwalks</b> and choose a walk. Each one belongs to a particular place, so head
+          there before you start.</li>
+        <li>Press <b>Start</b>. The walk downloads, then plays. Put your phone in your pocket: it keeps
+          playing with the screen locked.</li>
+      </ol>
+
+      <h2>Common questions</h2>
+      <div class="faq">
+        <b>I pressed Start but I don't hear anything.</b>
+        Each walk only plays at its location. If you're not there yet, the map shows where the walk
+        is. Also check that location access is on for Chromic (in your phone's Settings) and that
+        your volume is up.
+
+        <b>Where is Shimmers in the Field?</b>
+        Tregaron Conservancy, 3100 Macomb St NW, Washington, DC, open every day from dawn to dusk.
+        There's no fixed route: start from any entrance and wander. Headphones are recommended.
+
+        <b>The audio stopped when I locked my phone.</b>
+        Make sure location access is allowed and the walk is playing. It keeps going in the
+        background until you pause it, end the walk, or fully quit the app.
+
+        <b>Does it use a lot of data?</b>
+        Each walk downloads once (roughly 40–60 MB) before it starts, so nothing streams while you
+        walk. Downloading on Wi-Fi before you go is a good idea.
+
+        <b>Why does it need my location?</b>
+        Only to decide what you hear, and to sort walks nearest first. Your location never leaves your
+        phone. See the <a href="privacy.html">Privacy Policy</a>.
+      </div>
+
+      <h2>Reporting a problem</h2>
+      <ul>
+        <li><b>In the app:</b> open Settings (the cloud icon on the map) and choose <b>Report</b>. The
+          walk you're listening to is filled in for you.</li>
+        <li><b>By email:</b> <a href="mailto:brian.e2014@gmail.com">brian.e2014@gmail.com</a></li>
+      </ul>
+      <p>Reports are read by a person, usually the same day.</p>
+
+      <h2>Contact</h2>
+      <p>Questions about the app: <a href="mailto:brian.e2014@gmail.com">brian.e2014@gmail.com</a><br />
+        About Chromic and their work: <a href="https://chromic.space">chromic.space</a> ·
+        <a href="https://www.instagram.com/chromic_duo/">Instagram</a></p>
+
+      <footer>Chromic: A World of Stories · <a href="privacy.html">Privacy Policy</a> · built on Songitude by Brian Ellis</footer>
+    </div>
+  </div>
+</body>
+</html>

@@ -52,3 +52,11 @@ Expected, permanent differences — do not "fix" these when diffing:
 Everything else should be identical. If a diff shows anything beyond the list above, one side has
 work the other is missing. `WalkIntroCard.swift` and `SongitudeMark.swift` are still compiled but never shown; keep
 them in step anyway.
+
+## The website's backdrop
+
+`web/chromic/backdrop.js` redraws `LivingBackdrop` (Brand.swift) and `SquiggleField` (FirstRunView.swift)
+for songitude.com/chromic/*: the same layer periods, phases, zoom, travel and pace, and the same
+sprite mix, speeds, spin and sway. It is not playback, so it is not one of the six engines, but if
+the app's backdrop numbers or artwork change, change the script to match. Its images in
+`web/chromic/bg/` are the app's `Wash1–5` (as 720px WebP) and the @3x sprites.
