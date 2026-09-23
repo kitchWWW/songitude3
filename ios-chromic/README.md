@@ -75,5 +75,6 @@ xcrun devicectl device install app --device B2D9B778-9F37-5F8E-B577-DC1198121CF0
 ```
 
 `CFBundleVersion` is hardcoded in `Chromic/Info.plist` (as in Songitude) — bump it there *and*
-`CURRENT_PROJECT_VERSION` in the pbxproj before a TestFlight upload. There is no App Store Connect
-record for this bundle id yet.
+`CURRENT_PROJECT_VERSION` in the pbxproj before a TestFlight upload. App Store Connect record:
+"Chromic: A World of Stories", app id `6815062440`; 1.0 (2) uploaded 2026-09-22. Marketing and privacy pages: `web/chromic/` → songitude.com/chromic/index.html, /chromic/privacy.html. Listing copy
+drafts live in `STORE_LISTING.md`.
