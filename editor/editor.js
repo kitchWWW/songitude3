@@ -143,11 +143,45 @@
   }).addTo(map);
 
   // ============================================================ SHAPE MODEL ==
+  // Every engine keys its per-area state by id and treats a repeat as an error (iOS traps on it),
+  // so ids must be unique within a walk. They used to be a hash of type + counter + colour, and the
+  // counter restarts on import — so the first area drawn after re-importing a walk could reproduce
+  // an existing id exactly (Shimmers in the Field shipped that way). A GUID has no such history;
+  // the timestamp + random fallback only covers a browser without crypto.randomUUID.
+  function newId(prefix) {
+    for (;;) {
+      const raw = globalThis.crypto?.randomUUID?.()
+        ?? (Date.now().toString(36) + Math.random().toString(36).slice(2) + performance.now().toString(36).replace(".", ""));
+      const id = prefix + raw;
+      if (!idInUse(id)) return id;
+    }
+  }
+  function idInUse(id) {
+    return state.shapes.some((s) => s.id === id) || state.routes.some((r) => r.id === id)
+      || state.labels.some((l) => l.id === id);
+  }
+  /// The id an imported item keeps: its own, unless it has none or an earlier item already took it.
+  /// Counts repairs in `importRepairs` so the import can say it changed something.
+  let importRepairs = 0;
+  function claimId(id, prefix) {
+    if (id && !idInUse(id)) return id;
+    if (id) importRepairs += 1;
+    return newId(prefix);
+  }
+  /// Last line of defence before a bundle leaves the editor: no two items may share an id.
+  function assertUniqueIds() {
+    const seen = new Map();
+    for (const item of [...state.shapes, ...state.routes, ...state.labels]) {
+      if (seen.has(item.id)) throw new Error(`“${seen.get(item.id)}” and “${item.name}” share the id ${item.id}. Re-import the walk to repair it.`);
+      seen.set(item.id, item.name);
+    }
+  }
+
   function makeShape(type, geom) {
     shapeCounter += 1;
     const color = SHAPE_COLORS[type] || "#4363d8";
     const shape = {
-      id: "s_" + Math.abs(hashStr(type + shapeCounter + color)).toString(36),
+      id: newId("s_"),
       name: `Area ${shapeCounter}`,
       type,                          // "circle" | "polygon"
       color,
@@ -221,7 +255,7 @@
   function makeRoute(points) {
     routeCounter += 1;
     const route = {
-      id: "r_" + Math.abs(hashStr("route" + routeCounter + points.length)).toString(36),
+      id: newId("r_"),
       name: `Route ${routeCounter}`,
       points,                              // [[lat,lng], ...] in walking order; at least 2
       color: DEFAULT_ROUTE_COLOR,
@@ -360,7 +394,7 @@
       if (!Array.isArray(raw.points) || raw.points.length < 2) continue;   // nothing to draw
       routeCounter += 1;
       const r = {
-        id: raw.id || ("r_" + routeCounter),
+        id: claimId(raw.id, "r_"),
         name: raw.name || `Route ${routeCounter}`,
         points: raw.points.map((p) => [p[0], p[1]]),
         color: raw.color || DEFAULT_ROUTE_COLOR,
@@ -383,7 +417,7 @@
   function makeLabel(latlng) {
     labelCounter += 1;
     const label = {
-      id: "l_" + Math.abs(hashStr("label" + labelCounter + latlng.lat)).toString(36),
+      id: newId("l_"),
       name: `Label ${labelCounter}`,
       point: [latlng.lat, latlng.lng],
       text: "New label",
@@ -522,7 +556,7 @@
       // An image the bundle doesn't carry falls back to the text, as FORMAT.md specifies.
       const image = raw.image && imageStore.has(raw.image) ? raw.image : null;
       const l = {
-        id: raw.id || ("l_" + labelCounter),
+        id: claimId(raw.id, "l_"),
         name: raw.name || `Label ${labelCounter}`,
         point: [raw.point[0], raw.point[1]],
         text: raw.text || "",
@@ -2223,6 +2257,7 @@
 
   // Build the .zip bundle in memory. onProgress(percent) is called during compression.
   async function buildBundleZip(onProgress) {
+    assertUniqueIds();
     const zip = new JSZip();
     const usedAudio = new Set(state.shapes.map((s) => s.audioFile).filter(Boolean));
     if (state.introAudio) usedAudio.add(state.introAudio);
@@ -2364,11 +2399,12 @@
 
       // shapes
       shapeCounter = 0;
+      importRepairs = 0;
       for (const raw of bundle.shapes || []) {
         const geom = raw.type === "circle" ? { center: raw.center, radius: raw.radius } : { points: raw.points };
         shapeCounter += 1;
         const s = {
-          id: raw.id || ("s_" + shapeCounter), name: raw.name || `Area ${shapeCounter}`,
+          id: claimId(raw.id, "s_"), name: raw.name || `Area ${shapeCounter}`,
           type: raw.type, color: raw.color || SHAPE_COLORS[raw.type] || "#4363d8",
           audioFile: raw.audioFile || null, mode: raw.mode || "loop",
           gain: raw.gain ?? 1, fadeIn: raw.fadeIn ?? 2, fadeOut: raw.fadeOut ?? 3,
@@ -2387,6 +2423,7 @@
       setMode("edit");
       resetHistory();   // imported document is the new history baseline
       toast(`Imported “${state.name}” — ${state.shapes.length} area(s).`, "ok");
+      if (importRepairs) toast(`${importRepairs} item(s) shared an id with another and got a new one. Export or publish to save the repair.`, "err");
     } catch (err) {
       console.error(err);
       toast("Import failed: " + err.message, "err");

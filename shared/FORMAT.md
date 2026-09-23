@@ -104,6 +104,19 @@ bundle.zip
 }
 ```
 
+### Ids (`id`)
+
+Every `id` in `shapes`, `routes` and `labels` must be **unique within the walk**. Readers key their
+per-item state by it, and a repeated id is an invalid bundle, not something to work around: the iOS
+engines trap on it, and no engine is to be taught to tolerate it. The prefix (`s_`, `r_`, `l_`) is
+convention only. Readers treat an id as an opaque string.
+
+The editor mints ids as the prefix plus a GUID (`crypto.randomUUID()`, falling back to a timestamp +
+random value), refuses one already in use, re-ids any repeat it finds on import, and refuses to
+export or publish a walk that still has one. Older bundles carry short hash ids like `s_ab12cd`,
+which stay valid. They were a hash of type + counter + colour, and the counter restarting on import
+is how *Shimmers in the Field* shipped two areas with one id (repaired 2026-09-22).
+
 ### Intro card (`introColor`)
 
 Opening a walk in the iOS app shows a card over the map with the walk's `name`, its `creator`
