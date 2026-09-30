@@ -1,4 +1,4 @@
-# Chromic: A World of Stories — App Store listing (DRAFT)
+# Chromic: A World of Stories — App Store listing
 
 > **Shared copy for the team (Google Doc, edits come back here):**
 > https://docs.google.com/document/d/1wfcaX1a59tjDz2ZPKUv7Ms6faApJh3rumy-RqEW6oMk/edit
@@ -18,7 +18,7 @@ submitted to Apple** and nothing goes public until someone presses "Submit for R
 | App Store Connect record | "Chromic: A World of Stories", app id `6815062440` |
 | Bundle id / SKU | `com.brianellissound.chromic` / `chromic` |
 | Version | 1.0 (build 2 uploaded to TestFlight, with the new "Icon Small" app icon) |
-| Price | Free (placeholder, please confirm) |
+| Price | Free (confirmed by Brian, 2026-09-28) |
 
 Character limits are Apple's. The count in brackets is the current draft's length.
 
@@ -42,12 +42,17 @@ The line at the top of the page. It can be changed at any time without a new app
 October 17 swap the premiere sentence for Dorothy's second short description:
 "Explore places through immersive stories, music, and sound that unfold as you move." (83)
 
+Dorothy (Doc comment, 2026-09-23): keep the project-specific line until about **Nov 1**, then switch
+to the app-general wording above.
+
 > Immersive stories, sounds, and music that bring the places around you to life. Premiering October 17: Shimmers in the Field at Tregaron Conservancy.  *(148)*
 
 ## Description — max 4,000
 
-Dorothy's long description, verbatim, followed by press-release material. The App Store can't show
-bold or links, so section titles are in capitals.
+Dorothy's long description, verbatim, then How to Listen, About Chromic and the location note. Dorothy
+struck (2026-09-28, in the Doc) the Shimmers in the Field section, Lucy's quote, More Walks, and the
+press-release quoting in How to Listen. The App Store can't show bold or links, so section titles are
+in capitals.
 
 > A world of stories, waiting just beneath the surface.
 >
@@ -66,18 +71,8 @@ bold or links, so section titles are in capitals.
 >
 > A new world may be closer than you think.
 >
-> SHIMMERS IN THE FIELD
-> Premieres Saturday, October 17, 2026 at Tregaron Conservancy, Washington, D.C. Co-commissioned by Washington Performing Arts and Tregaron Conservancy.
->
-> "Blending original music, narration, storytelling, and sound design, Shimmers in the Field transforms a visit to Tregaron into a guided act of listening." The walk follows no fixed route: "visitors chart their own paths, linger where they choose, and encounter the work differently on every visit and in every season."
->
-> "Walking is an act of breathing. And when you walk, you start to notice the cycles of breath and moments of decay — the renewal that defines these moments." — Lucy Yao, Chromic
->
 > HOW TO LISTEN
-> Enable location services, put on headphones, and press play. "The GPS-triggered audio does the rest—no fixed route, no need to look at the phone." Experience a walk "in 10 minutes or an hour, from any starting point, and return across the seasons to discover new layers."
->
-> MORE WALKS
-> Listen to Chinatown (Manhattan), Emerald Futures (Manhattan) and how fragile, we bloom (Wave Hill, the Bronx).
+> Enable location services, put on headphones, and press play. The GPS-triggered audio does the rest—no fixed route, no need to look at the phone.
 >
 > ABOUT CHROMIC
 > Chromic, artists Lucy Yao and Dorothy Chan, "blends classical music, toy piano, and electronics into genre-fluid performances, immersive installations, and AR (Augmented Reality) soundwalks. Drawing from their experiences as immigrants and the Asian-American diaspora, they create concerts and experiences that invite listeners to slow down and wonder."
@@ -85,7 +80,7 @@ bold or links, so section titles are in capitals.
 > YOUR LOCATION STAYS YOURS
 > Your location is used on your phone, only while a walk is playing, to decide what you hear. It is never uploaded, stored or shared.
 
-*(2,654 characters.)* Apple rejects listings that mention other platforms, so the press
+*(1,732 characters.)* Apple rejects listings that mention other platforms, so the press
 release's "both iOS and Android" line is left out on purpose.
 
 ## Keywords — max 100, comma-separated, no spaces after commas
@@ -99,13 +94,13 @@ Words already in the name or subtitle ("Chromic", "World", "Stories", "lives", "
 
 | Field | Required? | Draft | Notes |
 |---|---|---|---|
-| Support URL | yes | `https://songitude.com/support/index.html` | Placeholder. Could be a Chromic contact page instead. |
+| Support URL | yes | `https://songitude.com/chromic/support.html` | Live draft page |
 | Marketing URL | no | `https://songitude.com/chromic/index.html` | Live draft page: the walks, how it works, bio, upcoming events. Please review the copy there too. |
 | Privacy Policy URL | yes | `https://songitude.com/chromic/privacy.html` | Live. Written for this app: no accounts, location stays on the device, what a report sends. |
 
 ## Copyright
 
-> 2026 Chromic  *(placeholder: who is the legal owner? Lucy Yao and Dorothy Chan?)*
+> 2026 Lucy Yao and Dorothy Chan
 
 ## Categories
 
@@ -122,17 +117,17 @@ Not shown for a first release.
 
 ## Still needed before submission
 
-- [ ] **Screenshots**: 6.9" iPhone at 1320 × 2868, up to 10. None exist for Chromic yet. `store/compose.py`
+- [x] **Screenshots**: 6.9" iPhone at 1320 × 2868, up to 10. The six frames in `store/out/` are uploaded (2026-09-28). `store/compose.py`
       can frame device screenshots of the Chromic app the same way as Songitude's.
-- [ ] **Age rating** questionnaire (Songitude's answers carry over: no objectionable content → 4+).
+- [x] **Age rating** (set 2026-09-28: 4+, no user-generated content since the app lists only Chromic's walks) questionnaire (Songitude's answers carry over: no objectionable content → 4+).
 - [ ] **App Privacy** ("nutrition label"): *Data Not Collected*, same as Songitude. Location is used on
       the device and never leaves it.
-- [ ] **Availability / pricing**: set territories explicitly. Songitude showed "removed from sale"
+- [x] **Availability / pricing** (2026-09-28: free, all 175 territories): set territories explicitly. Songitude showed "removed from sale"
       after approval because its record had no availability at all.
-- [ ] **App Review notes**: see below.
-- [ ] **Instagram and website links** for the About page: the press release gives
-      instagram.com/chromic_duo and chromic.space. They still need wiring into `Brand.swift` (and the
-      Android twin), then a new build.
+- [x] **App Review notes**: contact + notes are in ASC. The demo is a screen recording (2 min) uploaded as an App Review
+      attachment on 2026-09-30, and the notes say it is attached.
+- [x] **Instagram and website links** for the About page: instagram.com/chromic_duo and chromic.space
+      are wired into `Brand.swift` and its Android twin (2026-09-30). Ship them in build 4.
 - [ ] **Release timing**: the press release says the app "arrives in October" and the walk premieres
       Oct 17. Allow a few days for App Review before that date.
 
@@ -153,6 +148,6 @@ best to worst:
 > headphones as the listener walks. Every walk in this app is site-specific (Washington DC and New
 > York City), so audio only plays within the walk's area. The launch walk, Shimmers in the Field,
 > was co-commissioned by Washington Performing Arts and Tregaron Conservancy and premieres at
-> Tregaron Conservancy, 3100 Macomb St NW, Washington DC, on October 17, 2026. A demo video recorded on location is here:
-> [LINK TODO]. No account or sign-in is required. Location is used only while a walk is playing and
+> Tregaron Conservancy, 3100 Macomb St NW, Washington DC, on October 17, 2026. Because the audio only plays on
+> site, a screen recording of the app playing a walk while walking is attached to this submission. No account or sign-in is required. Location is used only while a walk is playing and
 > never leaves the device.
