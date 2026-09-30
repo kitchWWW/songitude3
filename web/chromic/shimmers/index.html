@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Shimmers in the Field · Chromic</title>
+  <meta name="description" content="Hear Shimmers in the Field, a soundwalk by Chromic at Tregaron Conservancy, Washington, D.C. Choose your phone to get the free app." />
+  <link rel="icon" type="image/png" sizes="32x32" href="../favicon-32.png" />
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png" />
+  <meta name="theme-color" content="#f7e7d6" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://songitude.com/chromic/shimmers/index.html" />
+  <meta property="og:title" content="Shimmers in the Field · Chromic" />
+  <meta property="og:description" content="A soundwalk by Chromic at Tregaron Conservancy. Put on headphones, open the app, and wander." />
+  <meta property="og:image" content="https://songitude.com/chromic/walk-garden-of-memories.jpg" />
+  <meta property="og:image:alt" content="A frog on moss at Tregaron Conservancy" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Julius+Sans+One&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="shimmers.css" />
+  <script src="../backdrop.js" defer></script>
+</head>
+<body>
+  <main class="wrap">
+    <a class="mark display" href="../index.html">Chromic</a>
+
+    <div class="walk">
+      <img src="../walk-garden-of-memories.jpg" alt="A frog on moss at Tregaron Conservancy" width="84" height="84" />
+      <div>
+        <h1 class="display">Shimmers in the Field</h1>
+        <p class="by">A soundwalk by Chromic · Tregaron Conservancy</p>
+      </div>
+    </div>
+
+    <p class="lede">Put on headphones and wander. "The GPS-triggered audio does the rest—no fixed
+      route, no need to look at the phone."</p>
+
+    <h2 class="display">Which phone do you have?</h2>
+    <nav class="choices" aria-label="Choose your phone">
+      <a class="big" id="ios" href="ios.html">
+        <span class="yours">Your phone</span>
+        <span class="label">iPhone</span>
+        <small>Get the free Chromic app</small>
+      </a>
+      <a class="big" id="android" href="android.html">
+        <span class="yours">Your phone</span>
+        <span class="label">Android</span>
+        <small>Get the free Songitude app</small>
+      </a>
+    </nav>
+
+    <p class="panel muted" style="margin:0;font-size:15px;text-align:center">Co-commissioned by
+      Washington Performing Arts and Tregaron Conservancy, in celebration of Washington Performing
+      Arts's 60th anniversary season and Tregaron Conservancy's 20th anniversary.</p>
+  </main>
+
+  <footer class="wrap">
+    <div class="row">
+      <a href="../index.html">About Chromic</a>
+      <a href="../privacy.html">Privacy</a>
+      <a href="../support.html">Support</a>
+    </div>
+  </footer>
+
+  <script>
+    // Gently point at the likely phone. Both buttons always stay visible and tappable.
+    (() => {
+      const ua = navigator.userAgent || "";
+      // iPadOS reports itself as a Mac; a touch screen gives it away.
+      const apple = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+      const android = /Android/i.test(ua);
+      const hit = apple ? "ios" : android ? "android" : null;
+      if (!hit) return;
+      const el = document.getElementById(hit);
+      el.classList.add("match");
+      el.setAttribute("aria-description", "Matches this device");
+      // Put the matching choice first, under the thumb.
+      el.parentNode.prepend(el);
+    })();
+  </script>
+</body>
+</html>
