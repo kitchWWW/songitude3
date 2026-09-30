@@ -52,6 +52,7 @@ a{color:inherit}
    it's the visitor's phone. The match is marked by the pill alone. */
 .big.apple,.big.apple.match{background:linear-gradient(135deg,#FF5C8A,#FF9A5A);color:#fff}
 .big.play,.big.play.match{background:linear-gradient(135deg,#7B5CFA,#3FA7FF);color:#fff}
+.big.apple,.big.play{align-items:center}
 
 /* Numbered steps, styled like the marketing site's "How to experience it". */
 .steps{list-style:none;margin:0;padding:0;counter-reset:s}
