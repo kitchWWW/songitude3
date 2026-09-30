@@ -128,7 +128,7 @@ Not shown for a first release.
       attachment on 2026-09-30, and the notes say it is attached.
 - [x] **Instagram and website links** for the About page: instagram.com/chromic_duo and chromic.space
       are wired into `Brand.swift` and its Android twin (2026-09-30). Ship them in build 4.
-- [ ] **Release timing**: the press release says the app "arrives in October" and the walk premieres
+- [x] **Submitted 2026-09-30** (build 4, releases on approval). **Release timing**: the press release says the app "arrives in October" and the walk premieres
       Oct 17. Allow a few days for App Review before that date.
 
 ### App Review risk: every walk is tied to a location
