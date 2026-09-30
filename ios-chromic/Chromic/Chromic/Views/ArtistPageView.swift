@@ -11,7 +11,7 @@ struct ArtistPageView: View {
     let onOpenWalk: (RemoteWalk) -> Void
 
     private var profile: ArtistProfile? { app.artists.profile(artistId) }
-    private var name: String { profile?.name?.isEmpty == false ? profile!.name! : fallbackName }
+    private var name: String { profile?.name?.isEmpty == false ? profile!.displayName : fallbackName }
     /// nil when the artist left their page on the app's own colours.
     private var theme: (color: Color, isDark: Bool)? { HexColor.parse(profile?.bgColor) }
     private var walks: [RemoteWalk] { app.catalog.walks.filter { $0.artistId == artistId } }

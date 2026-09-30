@@ -45,7 +45,7 @@ fun WalkIntroCard(app: AppState, experience: Experience, onOpenArtist: (String, 
     val remote = app.currentRemoteWalk
 
     val creator = remote?.creatorText?.takeIf { it.isNotEmpty() }
-        ?: experience.map.creator?.takeIf { it.isNotEmpty() }
+        ?: experience.map.creatorText.takeIf { it.isNotEmpty() }
 
     // The catalog's copy wins, so an edited description reaches a listener without the bundle being
     // republished; the bundle's own text is the fallback.

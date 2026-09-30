@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// A walk's own page (Figma "Project Page", `1:1352`): its title in the display face, the artwork
-/// edge to edge, one amber Start button, the artist, and the description. Start loads the walk and
-/// goes straight to the map — this page is where Songitude's intro card used to do its reading, so the
+/// edge to edge, one amber Start button, the artist, and the description. Opening the page starts
+/// the walk's download; Start loads the walk and goes straight to the map — this page is where Songitude's intro card used to do its reading, so the
 /// card itself is switched off (`Brand.showsIntroCard`).
 struct WalkDetailView: View {
     @EnvironmentObject var app: AppState
@@ -48,6 +48,9 @@ struct WalkDetailView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
+        // Start downloading while they read, so Start has little or nothing left to wait for.
+        // Start joins this download (see `AppState.prefetch`); a cached walk costs nothing.
+        .onAppear { app.prefetch(walk) }
     }
 
     /// The catalog's copy first — it reflects an edit without republishing the bundle — then the
@@ -66,13 +69,12 @@ struct WalkDetailView: View {
             .overlay(alignment: .bottom) { Brand.Palette.cardStroke.frame(height: 1) }
     }
 
+    /// Always reads "Start". For a walk that is already loaded it doesn't reload (that would stop
+    /// playback) — `WalksBrowserView.start` just returns to its map, where the walk is as they left it.
     private var startButton: some View {
-        let isCurrent = app.current?.id == walk.id
-        // A walk that is already loaded: "Start" would reload it and stop playback, so the button
-        // reads as what it does — take you back to its map.
-        return Button(isCurrent ? "Open map" : "Start", action: onStart)
+        Button("Start", action: onStart)
             .buttonStyle(BrandPrimaryButtonStyle())
-        .accessibilityLabel(isCurrent ? "Open the map" : "Start \(walk.name)")
+            .accessibilityLabel("Start \(walk.name)")
     }
 }
 

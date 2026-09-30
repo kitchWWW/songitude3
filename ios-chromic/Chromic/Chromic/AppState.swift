@@ -356,36 +356,98 @@ final class AppState: ObservableObject {
             presentIntroCard()
             return
         }
-        let previous = current
-        downloadingWalkId = walk.id; downloadProgress = 0; catalogError = nil
+        openFallback = current
+        catalogError = nil
+        // Join the download the walk's page already started, if there is one: the ring picks up
+        // where it has got to rather than starting a second copy from zero.
+        let fetch = startFetch(walk)
+        fetch.claimed = true
+        downloadingWalkId = walk.id; downloadProgress = fetch.progress
+        if let map = fetch.map { showWalkShell(shell(walk, map)) }
+    }
+
+    // MARK: - Walk downloads
+
+    /// One download per walk id, whoever asked for it first. The walk's page starts it the moment
+    /// it opens (`prefetch`) so the audio is mostly or entirely on disk by the time Start is
+    /// pressed; Start then *claims* the same download instead of beginning another.
+    private final class WalkFetch {
+        let cancel = WalkDownloader.Cancellation()
+        var progress: Double = 0
+        var map: SoundMap?
+        /// Start has joined it. Until then it is speculative, and may be superseded.
+        var claimed = false
+    }
+    private var fetches: [String: WalkFetch] = [:]
+    /// What to put back if the walk Start asked for fails to download.
+    private var openFallback: Experience?
+
+    /// Called when a walk's page opens. Free for a walk that is loaded, already downloading, or
+    /// cached at the published revision (two small file reads).
+    ///
+    /// Backing out doesn't cancel it: the rest of a half-downloaded walk is usually a few more
+    /// seconds, and finishing means the next visit opens instantly — every file lands atomically and
+    /// `.complete` is written last, so an interrupted one is only ever resumed, never trusted. What
+    /// does stop it is opening a *different* walk's page, so browsing through a few pages costs one
+    /// download, not one per page. A download that Start has claimed is never superseded.
+    func prefetch(_ walk: RemoteWalk) {
+        guard current?.id != walk.id, fetches[walk.id] == nil,
+              !WalkDownloader.isUpToDate(walk) else { return }
+        for (id, f) in fetches where !f.claimed {
+            f.cancel.cancel(); fetches[id] = nil
+        }
+        startFetch(walk)
+    }
+
+    /// The in-flight download for `walk`, started if there isn't one. Main thread only.
+    @discardableResult
+    private func startFetch(_ walk: RemoteWalk) -> WalkFetch {
+        if let f = fetches[walk.id] { return f }
+        let f = WalkFetch()
+        fetches[walk.id] = f
         WalkDownloader.download(
             walk,
+            cancel: f.cancel,
             mapReady: { [weak self] map in
-                guard let self, self.activeWalkRequest == walk.id else { return }
+                f.map = map
+                guard let self, f.claimed, self.activeWalkRequest == walk.id else { return }
                 // map.json is a few KB: recenter and retitle now rather than after the audio.
-                self.showWalkShell(Experience(id: walk.id,
-                                              directory: WalkDownloader.cacheDir(for: walk.id),
-                                              map: map))
+                self.showWalkShell(self.shell(walk, map))
             },
             progress: { [weak self] p in
-                guard let self, self.activeWalkRequest == walk.id else { return }
+                f.progress = p
+                guard let self, f.claimed, self.activeWalkRequest == walk.id else { return }
                 self.downloadProgress = p
             }
         ) { [weak self] result in
             guard let self = self else { return }
+            // A superseded download has already been replaced in the table; leave its successor.
+            if self.fetches[walk.id] === f { self.fetches[walk.id] = nil }
             self.refreshDownloadedIds()          // the files landed either way
-            // Superseded: the listener has opened something else since. Leave their view alone.
-            guard self.activeWalkRequest == walk.id else { return }
+            // Still only a prefetch, or superseded: the listener has opened something else since.
+            // Leave their view alone — the files are in the cache for next time.
+            guard f.claimed, self.activeWalkRequest == walk.id else { return }
             self.downloadingWalkId = nil
             switch result {
             case .success(let exp):
                 self.setCurrent(exp)                    // now the audio exists → load the engine
             case .failure(let e):
                 self.catalogError = "Download failed: \(e.localizedDescription)"
-                if let previous = previous { self.setCurrent(previous) }  // undo the preview
+                if let previous = self.openFallback { self.setCurrent(previous) }  // undo the preview
                 else { self.current = nil }
             }
         }
+        return f
+    }
+
+    /// Stop a download and forget it, for a walk whose files are about to be deleted.
+    private func cancelFetch(_ id: String) {
+        fetches.removeValue(forKey: id)?.cancel.cancel()
+        if downloadingWalkId == id { downloadingWalkId = nil }
+    }
+
+    private func shell(_ walk: RemoteWalk, _ map: SoundMap) -> Experience {
+        Experience(id: walk.id, directory: WalkDownloader.cacheDir(for: walk.id), map: map)
     }
 
     /// Put a walk on screen before its audio exists: map, title and re-centering only. The engine
@@ -405,6 +467,7 @@ final class AppState: ObservableObject {
     /// Uninstalling the walk that is currently loaded also unloads it — otherwise the engine would
     /// keep pointing at deleted audio and the row would still read as the active walk.
     func deleteDownloaded(_ id: String) {
+        cancelFetch(id)          // or it would go on writing into the directory being removed
         WalkDownloader.deleteCache(id)
         let wasCurrent = current?.id == id
         if activeWalkRequest == id { activeWalkRequest = nil }
@@ -431,7 +494,7 @@ final class AppState: ObservableObject {
     /// next open downloads it fresh. Each walk goes through `deleteDownloaded`, so a loaded one is
     /// unloaded rather than left pointing at deleted audio.
     func resetCache() {
-        for id in WalkDownloader.downloadedIds() { deleteDownloaded(id) }
+        for id in WalkDownloader.downloadedIds().union(fetches.keys) { deleteDownloaded(id) }
         WalkDownloader.deleteAllCaches()     // partial downloads, URLCache, intro gates
         refreshCatalog()
     }
@@ -466,6 +529,7 @@ final class AppState: ObservableObject {
     /// prompt won't show again and the button falls straight through to "authorized".
     func resetEverything() {
         engine.stop(); location.stop(); stopSlew()
+        for id in Array(fetches.keys) { cancelFetch(id) }
         WalkDownloader.deleteAllCaches()
         if let domain = Bundle.main.bundleIdentifier {
             UserDefaults.standard.removePersistentDomain(forName: domain)

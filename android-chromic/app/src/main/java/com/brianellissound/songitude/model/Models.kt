@@ -1,5 +1,7 @@
 package com.brianellissound.songitude.model
 
+import com.brianellissound.songitude.ui.Brand
+import com.brianellissound.songitude.ui.displayCreator
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -240,6 +242,8 @@ data class SoundMap(
 
     val dialoguePalette: DialogueColors get() = dialogueColors ?: DialogueColors()
     val isFuzzy: Boolean get() = displayStyle == "fuzzy"
+    /** The creator as shown to the listener (see [Brand.displayCreator]); "" when absent. */
+    val creatorText: String get() = Brand.displayCreator(creator)
 }
 
 /** A loadable bundle on disk: a folder holding map.json, audio/, and optional album art. */

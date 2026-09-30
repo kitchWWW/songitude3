@@ -6,8 +6,10 @@ import os
 ///
 ///     About  →  Soundwalks  →  a walk's page  →  (Start) the map
 ///
-/// About is the app's home. The list is one step in, a walk one more, and Start presents the map
-/// over the lot; leaving the map lands back here, on whatever page the path says.
+/// The stack opens on Soundwalks with About beneath it (`SplashRootView`'s landing path), so the
+/// list is where the app lands, its cloud pops to About, and About's "Soundwalks" button pushes the
+/// list again. A walk is one more step, and Start presents the map over the lot; leaving the map
+/// lands back here, on whatever page the path says.
 ///
 /// The path is the *parent's* state, handed in as a binding, so the map's buttons can set where to
 /// land before dismissing. Earlier versions kept it private and set it after the fact, and both
@@ -45,7 +47,8 @@ struct WalksBrowserView: View {
         .onChange(of: path) { new in Self.log.info("path → \(describe(new), privacy: .public)") }
     }
 
-    /// The artist's name, anywhere, goes home to About rather than pushing a second copy of it.
+    /// The artist's name, anywhere, goes to About (the stack's root) rather than pushing a second
+    /// copy of it.
     private func goHome() { path.removeAll() }
 
     private func start(_ walk: RemoteWalk) {
@@ -88,9 +91,13 @@ private struct SoundwalksList: View {
     var body: some View {
         ZStack {
             LivingBackdrop()
+            // Welcome's drifting squiggles, unmasked. Siblings of the wash rather than content of
+            // the ScrollView, so like the wash they hold still while the cards scroll over them —
+            // scrolling them would drag the field off-screen and leave the lower wash bare.
+            SquiggleField()
             ScrollView {
                 VStack(spacing: 0) {
-                    ScreenHeader(title: "soundwalks", onBack: onBack)
+                    ScreenHeader(title: "soundwalks", onBack: onBack, back: .about)
                     content
                         .padding(.top, 25)
                     credit
@@ -156,9 +163,15 @@ private struct SoundwalksList: View {
 
 /// Screen title in the display face with an optional back chevron over its left edge — the header
 /// every catalog screen shares (Figma: title 40pt centred at y≈88; chevron 46×43 at x=16).
+///
+/// Soundwalks goes back to About with the map's cloud instead of the chevron (`.about`), drawn on
+/// the same 44pt material chip as the settings button so the two read as a pair.
 struct ScreenHeader: View {
+    enum Back { case chevron, about }
+
     let title: String
     var onBack: (() -> Void)? = nil
+    var back: Back = .chevron
 
     var body: some View {
         ZStack {
@@ -173,12 +186,22 @@ struct ScreenHeader: View {
                 .frame(maxWidth: .infinity)
             if let onBack {
                 HStack {
-                    Button(action: onBack) {
-                        BrandIcon(name: "IconBack", height: 24)
-                            .frame(width: 46, height: 43)
-                            .contentShape(Rectangle())
+                    switch back {
+                    case .chevron:
+                        Button(action: onBack) {
+                            BrandIcon(name: "IconBack", height: 24)
+                                .frame(width: 46, height: 43)
+                                .contentShape(Rectangle())
+                        }
+                        .accessibilityLabel("Back")
+                    case .about:
+                        Button(action: onBack) {
+                            BrandIcon(name: Brand.AboutButton.icon, height: Brand.AboutButton.iconHeight)
+                                .frame(width: Brand.AboutButton.size, height: Brand.AboutButton.size)
+                                .background(.ultraThinMaterial, in: Circle())
+                        }
+                        .accessibilityLabel("About")
                     }
-                    .accessibilityLabel("Back")
                     Spacer()
                 }
                 .padding(.leading, 16)

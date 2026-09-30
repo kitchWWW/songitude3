@@ -15,10 +15,10 @@ enum Brand {
     /// filtered out in `RemoteCatalog.refresh` — the catalog itself is shared with Songitude.
     static let artistID = "80cda9dee7513416"
 
-    /// Where the About page's link icons go. Neither is known yet (nothing in the profile, the
-    /// Drive docs or DNS), so both icons stay hidden until these are filled in.
-    static let instagramURL: URL? = nil
-    static let websiteURL: URL? = nil
+    /// Where the About page's link icons go (confirmed by Brian, 2026-09-30). Optional so a
+    /// missing one simply hides its icon.
+    static let instagramURL: URL? = URL(string: "https://www.instagram.com/chromic_duo/")
+    static let websiteURL: URL? = URL(string: "https://chromic.space")
 
     /// Songitude on the App Store (App Store Connect id 6787213575) — the "Powered by Songitude"
     /// credit under the list of walks links here.
@@ -28,6 +28,17 @@ enum Brand {
     /// information lives on the walk's own page, and Start goes straight to the map — so the card
     /// never shows. `AppState.maybeShowIntroCard`/`presentIntroCard` check this.
     static let showsIntroCard = false
+
+    // MARK: Flow
+
+    /// How long the app can sit in the background and still come back exactly where it was left.
+    /// Longer than this, and with no walk under way, reopening starts over at the welcome page and
+    /// lands on Soundwalks — the listener has most likely put the phone away and is coming back to
+    /// choose a walk, not to finish reading a page they no longer remember opening. Five minutes
+    /// covers answering a message or checking a map in another app. A walk in progress (playing,
+    /// or its map on screen) is never reset, however long the phone was pocketed.
+    /// Twin: `Brand.RESUME_WINDOW_MS` on Android.
+    static let resumeWindow: TimeInterval = 5 * 60
 
     // MARK: Type
 
@@ -70,6 +81,17 @@ enum Brand {
     /// at 376×261 → 1.44:1.
     static let pageInset: CGFloat = 50
     static let pageMediaAspect: CGFloat = 376.0 / 261.0
+
+    // MARK: Icons
+
+    /// Soundwalks' way back to About. It borrows the cloud the map's settings button wears, as a
+    /// matched pair, until Dorothy's gear arrives — then only the settings button changes (its
+    /// asset is named in `ContentView`), and this stays the cloud. Size and chip match that button.
+    enum AboutButton {
+        static let icon = "IconCloud"
+        static let iconHeight: CGFloat = 20
+        static let size: CGFloat = 44
+    }
 }
 
 /// The watercolor wash behind every catalog screen (Drive "Background/Combined Background.png",
@@ -164,6 +186,87 @@ struct LivingBackdrop: View {
     }
 }
 
+// MARK: - Drifting squiggles
+
+/// The welcome-screen decorations (Drive "Welcome Screen Squiggles", trimmed to `Squiggle1–3`,
+/// `Star1–3`, `Dot1–3`) drifting slowly across the screen, each on its own heading with a gentle
+/// sway and a slow turn, wrapping round when it leaves. One `Canvas` under a `TimelineView`, so
+/// it is a single draw per frame however many sprites there are. Reduce Motion freezes it.
+///
+/// Over the first-run scene (masked there to thin out behind the permission copy) and over the
+/// Soundwalks list, where it sits between the wash and the cards. It never takes a touch.
+struct SquiggleField: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var sprites = Sprite.scatter()
+    @State private var start = Date()
+
+    private struct Sprite {
+        let name: String
+        var origin: CGPoint      // unit square
+        let heading: CGVector    // unit lengths per second
+        let scale: CGFloat
+        let spin: Double         // radians per second
+        let swayPhase: Double
+        let swayPeriod: Double   // seconds
+        let opacity: Double
+
+        /// A fresh, random arrangement: enough pieces to read as a field, none big enough to
+        /// crowd the title. Roughly the mock's mix — more dots than stars, more stars than squiggles.
+        static func scatter() -> [Sprite] {
+            let kinds = ["Squiggle1", "Squiggle2", "Squiggle3", "Squiggle2",
+                         "Star1", "Star2", "Star3", "Star1", "Star3",
+                         "Dot1", "Dot2", "Dot3", "Dot1", "Dot2", "Dot3", "Dot2", "Dot1", "Dot3"]
+            return kinds.map { name in
+                // Mostly upward, a little sideways: the squiggles read as rising through the wash.
+                let angle = Double.random(in: -Double.pi * 0.35 ... Double.pi * 0.35) - Double.pi / 2
+                let speed = Double.random(in: 0.010 ... 0.022)   // 60–120 s to cross the screen
+                return Sprite(name: name,
+                              // Spelled out: `.random` here resolves to CGPoint's Int initialiser,
+                              // which pins every sprite to a corner.
+                              origin: CGPoint(x: CGFloat.random(in: 0...1), y: CGFloat.random(in: 0...1)),
+                              heading: CGVector(dx: cos(angle) * speed, dy: sin(angle) * speed),
+                              scale: name.hasPrefix("Dot") ? .random(in: 0.8...1.2) : .random(in: 0.8...1.3),
+                              spin: .random(in: -0.12 ... 0.12),
+                              swayPhase: .random(in: 0 ... 2 * .pi),
+                              swayPeriod: .random(in: 6 ... 11),
+                              opacity: .random(in: 0.8 ... 1.0))
+            }
+        }
+    }
+
+    var body: some View {
+        TimelineView(.animation(paused: reduceMotion)) { timeline in
+            Canvas { context, size in
+                let t = timeline.date.timeIntervalSince(start)
+                // Margin so a sprite finishes leaving before it re-enters on the other side.
+                let m: CGFloat = 0.12
+                for s in sprites {
+                    guard let image = context.resolve(Image(s.name)) as GraphicsContext.ResolvedImage? else { continue }
+                    var x = (s.origin.x + s.heading.dx * t + m).truncatingRemainder(dividingBy: 1 + 2 * m)
+                    var y = (s.origin.y + s.heading.dy * t + m).truncatingRemainder(dividingBy: 1 + 2 * m)
+                    if x < 0 { x += 1 + 2 * m }
+                    if y < 0 { y += 1 + 2 * m }
+                    x -= m; y -= m
+                    let sway = sin(t * 2 * .pi / s.swayPeriod + s.swayPhase) * 10
+                    let at = CGPoint(x: x * size.width + sway, y: y * size.height)
+
+                    context.drawLayer { layer in
+                        layer.opacity = s.opacity
+                        layer.translateBy(x: at.x, y: at.y)
+                        layer.rotate(by: .radians(s.spin * t))
+                        layer.scaleBy(x: s.scale, y: s.scale)
+                        let sz = image.size
+                        layer.draw(image, in: CGRect(x: -sz.width / 2, y: -sz.height / 2,
+                                                     width: sz.width, height: sz.height))
+                    }
+                }
+            }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+    }
+}
+
 extension Color {
     /// `Color(hex: 0xRRGGBB)` — the mock's colours are all opaque sRGB hex.
     init(hex: UInt32) {
@@ -172,5 +275,22 @@ extension Color {
                   green: Double((hex >> 8) & 0xFF) / 255,
                   blue: Double(hex & 0xFF) / 255,
                   opacity: 1)
+    }
+}
+
+// MARK: Creator name
+
+extension Brand {
+    /// The artist was "Chromic Duo" and is now just "Chromic". Walks already published under the old
+    /// name carry it in their map.json and catalog entry, and those can't be re-published from the
+    /// back end — so the app renames them for display instead. Every reader of a walk's creator or
+    /// an artist's name goes through here (`RemoteWalk.creatorText`, `SoundMap.creatorText`,
+    /// `ArtistProfile.displayName`); the stored and fetched data are never rewritten. Any other
+    /// creator passes through untouched. Chromic-only — see `../SYNC.md`.
+    /// Twin: `Brand.displayCreator` on Android.
+    static func displayCreator(_ name: String?) -> String {
+        guard let name else { return "" }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.caseInsensitiveCompare("Chromic Duo") == .orderedSame ? Brand.name : name
     }
 }

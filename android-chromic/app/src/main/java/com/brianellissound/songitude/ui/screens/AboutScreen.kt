@@ -30,8 +30,9 @@ import com.brianellissound.songitude.ui.*
 
 /**
  * About Chromic (Figma "About", `24:2062`, titled with the name): their photo edge to edge, the
- * "Soundwalks" button under it, the bio from their published profile, and link icons. The app's
- * home — the root of the stack — and where the artist's name on every walk leads back to.
+ * "Soundwalks" button under it, the bio from their published profile, and link icons. The root of
+ * the stack, beneath Soundwalks (where the app lands): Soundwalks' cloud and the artist's name on
+ * every walk lead back here, and "Soundwalks" is the way back to the list.
  *
  * The bio is the live profile (`artists/<id>.json`, edited from the Songitude editor) so a rewrite
  * reaches the app without a release. The photo ships in the app: the profile format has no image.

@@ -67,12 +67,15 @@ fun SoundwalksScreen(
 
     Box(Modifier.fillMaxSize()) {
         LivingBackdrop()
+        // Welcome's drifting squiggles, unfaded. Siblings of the wash rather than list items, so
+        // like the wash they hold still while the cards scroll over them.
+        SquiggleField(Modifier.fillMaxSize())
         PullToRefreshBox(
             isRefreshing = refreshing,
             onRefresh = { refreshing = true; app.refreshCatalog { refreshing = false } },
         ) {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 40.dp)) {
-                item { ScreenHeader("soundwalks", onBack); Spacer(Modifier.height(25.dp)) }
+                item { ScreenHeader("soundwalks", onBack, back = HeaderBack.About); Spacer(Modifier.height(25.dp)) }
                 when {
                     loading && walks.isEmpty() -> item {
                         Row(

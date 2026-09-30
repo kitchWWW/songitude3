@@ -18,6 +18,7 @@ import com.brianellissound.songitude.data.CatalogEndpoints
 import com.brianellissound.songitude.data.ExperienceLibrary
 import com.brianellissound.songitude.data.RemoteWalk
 import com.brianellissound.songitude.data.WalkDownloader
+import com.brianellissound.songitude.data.WalkDownloads
 import com.brianellissound.songitude.location.SongitudeLocationManager
 import com.brianellissound.songitude.model.CoordinateOffset
 import com.brianellissound.songitude.model.Experience
@@ -36,6 +37,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
@@ -69,6 +72,8 @@ class AppState(app: Application) : AndroidViewModel(app) {
     val location: SongitudeLocationManager = (app as SongitudeApp).location
     val engine: RenderEngine = (app as SongitudeApp).engine
     val downloader = WalkDownloader(ctx)
+    /** Application-scoped, so a download outlives this ViewModel (see [WalkDownloads]). */
+    private val downloads: WalkDownloads = (app as SongitudeApp).downloads
 
     // MARK: - Published state
 
@@ -478,22 +483,31 @@ class AppState(app: Application) : AndroidViewModel(app) {
         }
         val previous = _current.value
         _downloadingWalkId.value = walk.id
-        _downloadProgress.value = 0.0
         _downloadPhase.value = DownloadPhase.DOWNLOADING
         _catalogError.value = null
+        // Join the download the walk's page already started, if there is one: the ring picks up
+        // where it has got to rather than starting a second copy from zero.
+        val download = downloads.claim(walk)
+        _downloadProgress.value = download.progress.value
 
+        // This only stops *watching* the walk opened before; its download carries on in the
+        // Application and lands in the cache for next time, as it does on iOS.
         downloadJob?.cancel()
         downloadJob = viewModelScope.launch {
-            val result = downloader.download(
-                walk,
-                mapReady = { map ->
+            val watchers = listOf(
+                launch {
+                    // map.json is a few KB: recenter and retitle now rather than after the audio.
+                    val map = download.map.filterNotNull().first()
                     if (activeWalkRequest == walk.id) {
-                        // map.json is a few KB: recenter and retitle now rather than after the audio.
                         showWalkShell(Experience(walk.id, downloader.cacheDir(walk.id), map))
                     }
                 },
-                progress = { p -> if (activeWalkRequest == walk.id) _downloadProgress.value = p },
+                launch {
+                    download.progress.collect { p -> if (activeWalkRequest == walk.id) _downloadProgress.value = p }
+                },
             )
+            val result = download.await()
+            watchers.forEach { it.cancel() }
             refreshDownloadedIds()            // the files landed either way
             // Superseded: the listener has opened something else since. Leave their view alone.
             if (activeWalkRequest != walk.id) return@launch
@@ -506,6 +520,19 @@ class AppState(app: Application) : AndroidViewModel(app) {
                 },
             )
         }
+    }
+
+    /**
+     * Called when a walk's page opens, so the audio is on its way while the listener reads and
+     * Start has little or nothing left to wait for. Free for a walk that is loaded or already
+     * cached at the published revision; see [WalkDownloads.prefetch] for what backing out does.
+     * A speculative download is not watched here — nothing on screen shows it until Start.
+     */
+    fun prefetch(walk: RemoteWalk) {
+        if (_current.value?.id == walk.id || downloader.isUpToDate(walk)) return
+        val download = downloads.prefetch(walk)
+        // Refresh what the lists think is on disk once it lands, even if Start never comes.
+        viewModelScope.launch { download.await(); refreshDownloadedIds() }
     }
 
     // MARK: - Preparing audio
@@ -612,6 +639,8 @@ class AppState(app: Application) : AndroidViewModel(app) {
 
     /** Delete a downloaded walk's local files. Uninstalling the loaded walk also unloads it. */
     fun deleteDownloaded(id: String) {
+        downloads.cancel(id)      // or it would go on writing into the directory being removed
+        if (_downloadingWalkId.value == id) _downloadingWalkId.value = null
         downloader.deleteCache(id, engine)
         val wasCurrent = _current.value?.id == id
         if (activeWalkRequest == id) activeWalkRequest = null
@@ -632,7 +661,7 @@ class AppState(app: Application) : AndroidViewModel(app) {
      * [deleteDownloaded], so a loaded one is unloaded rather than left pointing at deleted files.
      */
     fun resetCache() {
-        downloader.downloadedIds().forEach { deleteDownloaded(it) }
+        (downloader.downloadedIds() + downloads.ids()).forEach { deleteDownloaded(it) }
         downloader.deleteAllCaches()     // partial downloads, decoded PCM, intro gates
         refreshDownloadedIds()
         refreshCatalog()
@@ -670,6 +699,7 @@ class AppState(app: Application) : AndroidViewModel(app) {
      */
     fun resetEverything() {
         engine.stop(); location.stop(); stopSlew()
+        downloads.cancelAll()
         downloader.deleteAllCaches()
         prefs.edit().clear().apply()
         _offset.value = CoordinateOffset.NONE

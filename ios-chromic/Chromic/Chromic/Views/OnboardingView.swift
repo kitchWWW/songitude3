@@ -14,6 +14,8 @@ struct OnboardingView: View {
     @EnvironmentObject var app: AppState
     /// Space the scene's title occupies above us.
     var topInset: CGFloat = 140
+    /// The answer is in, or was declined: leave the welcome. `FirstRunView` records onboarding.
+    var onDone: () -> Void = {}
     @State private var requested = false
 
     var body: some View {
@@ -46,7 +48,7 @@ struct OnboardingView: View {
                 // The way in without granting anything. It also means this screen can never strand
                 // anyone: if iOS declines to present the dialog at all (a restricted device), the
                 // primary button appears to do nothing and this is still a way forward.
-                Button("Not now") { app.completeOnboarding() }
+                Button("Not now") { onDone() }
                     .font(Brand.body(15, weight: .medium))
                     .foregroundStyle(Brand.Palette.bodyText.opacity(0.75))
                     .padding(.vertical, 6)
@@ -66,7 +68,7 @@ struct OnboardingView: View {
             // nothing here: ContentView owns the single "Location is off" alert, and it fires from
             // togglePlayback — at the moment the listener asks for the thing that needs location.
             guard requested, status != .notDetermined else { return }
-            app.completeOnboarding()
+            onDone()
         }
     }
 
@@ -76,7 +78,7 @@ struct OnboardingView: View {
         if app.location.authorization == .notDetermined {
             app.enableLocation()          // system dialog → .onChange carries the outcome
         } else {
-            app.completeOnboarding()      // already decided, one way or the other — nothing to ask
+            onDone()      // already decided, one way or the other — nothing to ask
         }
     }
 }

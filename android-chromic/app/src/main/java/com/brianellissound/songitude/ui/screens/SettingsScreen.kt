@@ -38,7 +38,7 @@ fun SettingsScreen(app: AppState, onClose: () -> Unit) {
 
     val walkName = current?.displayName
     val artistName = app.currentRemoteWalk?.creatorText?.takeIf { it.isNotEmpty() }
-        ?: current?.map?.creator?.takeIf { it.isNotEmpty() }
+        ?: current?.map?.creatorText?.takeIf { it.isNotEmpty() }
 
     Scaffold(
         topBar = {

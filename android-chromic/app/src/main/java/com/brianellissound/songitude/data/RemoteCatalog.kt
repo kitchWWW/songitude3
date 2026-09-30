@@ -12,10 +12,13 @@ import com.brianellissound.songitude.model.GeoUtils
 import com.brianellissound.songitude.model.LatLngD
 import com.brianellissound.songitude.model.SongitudeJson
 import com.brianellissound.songitude.model.SoundMap
+import com.brianellissound.songitude.ui.Brand
+import com.brianellissound.songitude.ui.displayCreator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -50,7 +53,8 @@ data class RemoteWalk(
 ) {
     val centerCoord: LatLngD?
         get() = center?.takeIf { it.size == 2 }?.let { LatLngD(it[0], it[1]) }
-    val creatorText: String get() = creator?.takeIf { it.isNotEmpty() } ?: ""
+    /** Display only (see [Brand.displayCreator]); [creator] itself is what was published. */
+    val creatorText: String get() = Brand.displayCreator(creator)
 }
 
 @Serializable
@@ -65,7 +69,7 @@ data class ArtistProfile(
     val bio: String? = null,
     val bgColor: String? = null,
 ) {
-    val displayName: String get() = name?.takeIf { it.isNotEmpty() } ?: "Unknown artist"
+    val displayName: String get() = name?.takeIf { it.isNotEmpty() }?.let { Brand.displayCreator(it) } ?: "Unknown artist"
 }
 
 object CatalogEndpoints {
@@ -254,6 +258,10 @@ class WalkDownloader(private val context: Context) {
      * files sat at "eleven of twelve" for a minute while the one 107 MB clip came down.
      *
      * Decoding is not done here: see [com.brianellissound.songitude.AppState.prepareAndLoad].
+     *
+     * Cancelling the calling coroutine stops it within a chunk and returns a failure. It never
+     * writes `.complete`, and each file is moved into place only once whole, so all it leaves
+     * behind is finished clips the next download reuses. Callers go through [WalkDownloads].
      */
     suspend fun download(
         walk: RemoteWalk,
@@ -263,7 +271,14 @@ class WalkDownloader(private val context: Context) {
         try {
             val dir = cacheDir(walk.id)
             File(dir, "audio").mkdirs()
+            // Un-mark the old revision before overwriting its map.json. Otherwise a download
+            // interrupted part-way (now likely: the walk's page starts one the listener may walk
+            // away from) leaves the new map beside a stale `.complete`, and [cachedExperience]
+            // would open it with clips that never arrived.
+            File(dir, ".complete").delete()
+            versionFile(walk.id).delete()
             val mapBytes = CatalogService.httpGet(walk.mapUrl, noCache = true)
+            ensureActive()
             File(dir, "map.json").writeBytes(mapBytes)
             val map = SongitudeJson.decodeFromString<SoundMap>(mapBytes.decodeToString())
             withContext(Dispatchers.Main) { mapReady(map) }
@@ -318,6 +333,9 @@ class WalkDownloader(private val context: Context) {
                                 val tmp = File(dest.parentFile, dest.name + ".part")
                                 try {
                                     CatalogService.httpGetToFile("${walk.base}/$enc", tmp, noCache = !isAudio) { n ->
+                                        // The read loop blocks, so cancellation is checked per
+                                        // chunk, or a superseded prefetch would finish its 100 MB clip.
+                                        ensureActive()
                                         received.addAndGet(n); report()
                                     }
                                     if (!tmp.renameTo(dest)) { tmp.copyTo(dest, overwrite = true); tmp.delete() }
@@ -331,6 +349,7 @@ class WalkDownloader(private val context: Context) {
                     }
                 }.awaitAll()
             }
+            ensureActive()   // cancelled (e.g. Reset Cache mid-way): never mark a partial walk complete
             File(dir, ".complete").writeBytes(ByteArray(0))
             versionFile(walk.id).writeText(walk.updatedAt ?: "")
 

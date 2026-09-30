@@ -54,6 +54,11 @@ struct ContentView: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)
+            // Above the cards' scrims, like the transport below. Each card lays a full-screen clear
+            // tap-catcher at zIndex 1 so a tap beside it dismisses it; left at the default 0, the
+            // top bar sat *under* that catcher, and a tap on the gear only closed the card — with
+            // the intro card followed by the far-away card, the gear took three taps to open.
+            .zIndex(2)
 
             VStack {
                 Spacer()
@@ -64,7 +69,7 @@ struct ContentView: View {
                     // Only offered when the walk actually has an outro to play.
                     if app.engine.isRunning && app.engine.canEndSession && app.currentHasOutro {
                         Button { app.engine.endSession() } label: {
-                            Text("Play Outro")
+                            Text("Say Goodbye")
                                 .font(.headline).foregroundStyle(.primary)
                                 .padding(.horizontal, 18).padding(.vertical, 14)
                                 .background(.ultraThinMaterial, in: Capsule())

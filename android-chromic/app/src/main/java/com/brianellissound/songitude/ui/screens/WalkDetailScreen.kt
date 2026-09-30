@@ -16,8 +16,8 @@ import com.brianellissound.songitude.ui.*
 
 /**
  * A walk's own page (Figma "Project Page", `1:1352`): its title in the display face, the artwork
- * edge to edge, one amber Start button straight under it, the artist, and the description. Start
- * loads the walk and presents the map — this page is where Songitude's intro card used to do its
+ * edge to edge, one amber Start button straight under it, the artist, and the description. Opening
+ * the page starts the walk's download; Start loads the walk and presents the map — this page is where Songitude's intro card used to do its
  * reading, so the card itself is switched off (`Brand.SHOWS_INTRO_CARD`).
  */
 @Composable
@@ -31,7 +31,9 @@ fun WalkDetailScreen(
     val current by app.current.collectAsState()
     val contentVersion by app.contentVersion.collectAsState()
     val art = remember(walk.artUrl, contentVersion) { walk.artUrl?.let { app.content.cachedFile(it) } ?: walk.artUrl }
-    val isCurrent = current?.id == walk.id
+    // Start downloading while they read, so Start has little or nothing left to wait for. Start
+    // joins this download (see AppState.prefetch); a loaded or cached walk costs nothing.
+    LaunchedEffect(walk.id) { app.prefetch(walk) }
     // The catalog's copy first — it reflects an edit without republishing the bundle — then the
     // bundle's own `about`, for a walk that predates the catalog carrying one.
     val about = walk.about?.takeIf { it.isNotBlank() }
@@ -47,10 +49,10 @@ fun WalkDetailScreen(
                     contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
                 )
             }
-            // A walk that is already loaded: "Start" would reload it and stop playback, so the
-            // button reads as what it does — take you back to its map.
+            // Always "Start". For a walk that is already loaded it doesn't reload (that would stop
+            // playback) — HomeRoot just returns to its map, where the walk is as they left it.
             BrandPrimaryButton(
-                if (isCurrent) "Open map" else "Start", onClick = onStart,
+                "Start", onClick = onStart,
                 modifier = Modifier.padding(horizontal = Brand.PAGE_INSET).padding(top = 24.dp),
             )
             Row(

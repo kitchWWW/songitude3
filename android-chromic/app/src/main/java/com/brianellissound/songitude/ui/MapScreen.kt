@@ -183,7 +183,7 @@ fun MapScreen(
                         onClick = { app.engine.endSession() },
                     ) {
                         Text(
-                            "Play Outro",
+                            "Say Goodbye",
                             Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
                             style = MaterialTheme.typography.titleSmall,
                         )

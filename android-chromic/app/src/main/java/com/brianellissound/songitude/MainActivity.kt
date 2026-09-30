@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -19,6 +20,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.brianellissound.songitude.data.RemoteWalk
 import com.brianellissound.songitude.ui.Brand
@@ -41,6 +44,67 @@ private sealed interface Route {
     data class Walk(val walk: RemoteWalk) : Route
 }
 
+/**
+ * Where the listener is in the app, held for the life of the **process** rather than the Activity.
+ *
+ * Android destroys the Activity while a walk plays with the screen off (see `android/LIFECYCLE.md`,
+ * L10), and a recreated Activity is not a fresh start: it must come back to the same page, and the
+ * time spent away must still count. An `object` lives exactly as long as the process — the same
+ * lifetime as the engine and the loaded walk on [SongitudeApp] — and a process death starts it over,
+ * which is what makes that a cold start and shows the welcome. The iOS twin keeps the same state
+ * as `@State` on `SplashRootView`, where the view's lifetime already is the process's.
+ */
+private object HomeSession {
+    /** Home opens on Soundwalks with About underneath it, so the cloud is an ordinary pop. */
+    val LANDING: List<Route> = listOf(Route.Walks)
+
+    /** True from process start until the welcome (and the location page, if shown) is passed. */
+    var welcoming by mutableStateOf(true)
+    var path by mutableStateOf(LANDING)
+    var showMap by mutableStateOf(false)
+    /** The walk whose map was last shown for its arrival, so the map opens once when a walk becomes
+     *  current (Start, a deep link) and not again every time home is composed. */
+    var announcedWalkId: String? = null
+
+    /** `elapsedRealtime` at the last `onStop` (it counts deep sleep, which the screen-off case is);
+     *  null while in the foreground. */
+    private var stoppedAt: Long? = null
+    /** Whether a walk was under way at that moment. Sampled on the way out as well as on return,
+     *  because `reconcileOnForeground` may settle a dead mixer into "paused" as we come back, and a
+     *  walk that was playing when the phone was pocketed must count as under way regardless. */
+    private var walkActiveWhenStopped = false
+
+    /** A walk is under way while it plays — in the background too — or while its map is on screen,
+     *  playing or paused. Either way the listener is coming back to the walk, not to the app. */
+    private fun walkUnderWay(app: SongitudeApp) = app.engine.isRunning.value || showMap
+
+    fun leftForeground(app: SongitudeApp) {
+        stoppedAt = SystemClock.elapsedRealtime()
+        walkActiveWhenStopped = walkUnderWay(app)
+    }
+
+    /** Back after [Brand.RESUME_WINDOW_MS] with no walk under way: start over at the welcome.
+     *  Anything shorter — or any absence at all mid-walk — resumes exactly where it was. */
+    fun returnedToForeground(app: SongitudeApp) {
+        val since = stoppedAt ?: return
+        stoppedAt = null
+        val away = SystemClock.elapsedRealtime() - since
+        if (away <= Brand.RESUME_WINDOW_MS || walkActiveWhenStopped || walkUnderWay(app) || welcoming) return
+        Log.i(NAV_TAG, "back after ${away / 1000}s with no walk under way → welcome")
+        welcoming = true
+        path = LANDING
+        showMap = false
+    }
+
+    /** The welcome is over. Home lands on Soundwalks — also after "Reset app", which can leave the
+     *  old path and an open map behind it. A loaded-but-idle walk stays loaded. */
+    fun enterHome() {
+        welcoming = false
+        path = LANDING
+        showMap = false
+    }
+}
+
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -57,6 +121,16 @@ class MainActivity : ComponentActivity() {
                 Root(app, intent?.data)
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        HomeSession.returnedToForeground(application as SongitudeApp)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        HomeSession.leftForeground(application as SongitudeApp)
     }
 
     override fun onResume() {
@@ -85,8 +159,9 @@ private fun Root(app: AppState, deepLink: Uri?) {
     LaunchedEffect(deepLink) { deepLink?.let { app.handleDeepLink(it) } }
 
     // Keyed on the reset token so "Reset app" starts the first-run scene over from the landing.
+    // The welcome shows on every cold start and after a long absence, not only until onboarding.
     key(resetToken) {
-        if (!hasOnboarded) FirstRun(app) else HomeRoot(app)
+        if (!hasOnboarded || HomeSession.welcoming) FirstRun(app) else HomeRoot(app)
     }
 
     if (showPermissionAlert) {
@@ -115,12 +190,19 @@ private fun Root(app: AppState, deepLink: Uri?) {
 }
 
 /**
- * The first launch: landing → location → (Android 13+) notification → home. The permission
- * plumbing is Songitude's, untouched; only the screens changed (`FirstRunScreen`).
+ * The welcome: landing → location → (Android 13+) notification → home. Shown on every cold start,
+ * and after a long absence ([HomeSession.returnedToForeground]). The location page is skipped when
+ * fine location is already granted, and the notification page when notifications already are. The
+ * permission plumbing is Songitude's, untouched; only the screens changed (`FirstRunScreen`).
  */
 @Composable
 private fun FirstRun(app: AppState) {
+    val context = LocalContext.current
     var step by rememberSaveable { mutableStateOf(FirstRunStep.LANDING) }
+    fun granted(permission: String) =
+        ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+    // Onboarding is still recorded (it gates deep links, and a reset clears it), then home.
+    val finish = { app.completeOnboarding(); HomeSession.enterHome() }
     // True from the moment Continue is pressed until the system has finished with us. The screen
     // holds still for the whole of that.
     var awaitingSystemUi by remember { mutableStateOf(false) }
@@ -130,18 +212,20 @@ private fun FirstRun(app: AppState) {
     ) { granted ->
         Log.i(NAV_TAG, "notification permission result: $granted → home")
         awaitingSystemUi = false
-        app.completeOnboarding()
+        finish()
     }
 
     // On anything below Android 13 there is no runtime notification permission, so the third
-    // step has nothing to ask for and is skipped rather than shown for nothing.
+    // step has nothing to ask for and is skipped rather than shown for nothing — as it is when a
+    // later launch comes back through the location page with notifications already allowed.
     val advancePastLocation = {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            !granted(Manifest.permission.POST_NOTIFICATIONS)) {
             Log.i(NAV_TAG, "location done → notification page")
             step = FirstRunStep.NOTIFICATION
         } else {
-            Log.i(NAV_TAG, "location done, no notification permission on this Android → home")
-            app.completeOnboarding()
+            Log.i(NAV_TAG, "location done, nothing to ask about notifications → home")
+            finish()
         }
     }
 
@@ -178,7 +262,17 @@ private fun FirstRun(app: AppState) {
     FirstRunScreen(
         step = step,
         busy = awaitingSystemUi,
-        onBegin = { Log.i(NAV_TAG, "landing → location page"); step = FirstRunStep.LOCATION },
+        onBegin = {
+            // A grant needs no second pitch on every launch. Coarse-only still gets the page: a walk
+            // needs fine location to tell one area from the next.
+            if (granted(Manifest.permission.ACCESS_FINE_LOCATION)) {
+                Log.i(NAV_TAG, "landing, location already granted → home")
+                finish()
+            } else {
+                Log.i(NAV_TAG, "landing → location page")
+                step = FirstRunStep.LOCATION
+            }
+        },
         onContinue = {
             awaitingSystemUi = true
             when (step) {
@@ -192,7 +286,7 @@ private fun FirstRun(app: AppState) {
             Log.i(NAV_TAG, "not now on $step")
             when (step) {
                 FirstRunStep.LOCATION -> advancePastLocation()
-                else -> app.completeOnboarding()
+                else -> finish()
             }
         },
     )
@@ -203,6 +297,11 @@ private fun FirstRun(app: AppState) {
  * from Songitude, where the map is the root and the list a cover. The map is where Start takes you,
  * and leaving it returns you to the page you started from, walk still playing.
  *
+ * It opens on Soundwalks with About underneath ([HomeSession.LANDING]) rather than pushing About
+ * from the list: the cloud is then an ordinary pop, About's "Soundwalks" button the way back, and
+ * the artist's name anywhere still goes to About by clearing the path. The state is
+ * [HomeSession]'s, so a recreated Activity comes back to the same page.
+ *
  * Plain state rather than a nav graph, as before. System Back walks it: closes Settings, then
  * leaves the map, then pops the stack, then leaves the app.
  */
@@ -210,13 +309,18 @@ private fun FirstRun(app: AppState) {
 private fun HomeRoot(app: AppState) {
     val current by app.current.collectAsState()
     val walks by app.walks.collectAsState()
-    var path by remember { mutableStateOf<List<Route>>(emptyList()) }
-    var showMap by remember { mutableStateOf(false) }
+    var path by HomeSession::path
+    var showMap by HomeSession::showMap
     var showSettings by remember { mutableStateOf(false) }
 
-    // A QR deep link names a walk — or the Activity comes back to a walk still playing on the
-    // Application — and the map is what to show. Start goes through here too, harmlessly.
-    LaunchedEffect(current?.id) { if (current != null) showMap = true }
+    // A QR deep link names a walk — even one that arrived during the welcome — and the map is what
+    // to show. Only for a walk not already announced: a recreated Activity adopting the playing
+    // walk keeps whatever page the session was on, and starting over after a long absence doesn't
+    // bounce a loaded-but-idle walk's map straight back up. Start goes through here too, harmlessly.
+    LaunchedEffect(current?.id) {
+        val id = current?.id ?: return@LaunchedEffect
+        if (id != HomeSession.announcedWalkId) { HomeSession.announcedWalkId = id; showMap = true }
+    }
 
     /** The current walk's page, when the catalog knows it; otherwise the list. */
     fun walkPath(): List<Route> {

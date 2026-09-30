@@ -22,7 +22,8 @@ struct RemoteWalk: Identifiable, Codable {
         guard let c = center, c.count == 2 else { return nil }
         return CLLocationCoordinate2D(latitude: c[0], longitude: c[1])
     }
-    var creatorText: String { (creator?.isEmpty == false) ? creator! : "" }
+    /// Display only (see `Brand.displayCreator`); `creator` itself is what was published.
+    var creatorText: String { Brand.displayCreator(creator) }
 }
 
 struct WalkManifest: Codable { let version: Int; let walks: [RemoteWalk] }
@@ -34,7 +35,7 @@ struct ArtistProfile: Codable {
     let bio: String?          // markdown source
     let bgColor: String?      // "#rrggbb"
 
-    var displayName: String { (name?.isEmpty == false) ? name! : "Unknown artist" }
+    var displayName: String { (name?.isEmpty == false) ? Brand.displayCreator(name) : "Unknown artist" }
 }
 
 /// Fetches artist profiles on demand and keeps them in memory for the session. Profiles are tiny
@@ -223,7 +224,12 @@ enum WalkDownloader {
     /// Download map.json + all referenced audio + album art. progress in 0...1 on the main queue.
     /// `mapReady` fires as soon as map.json is parsed — long before the audio arrives — so the UI
     /// can show the right walk immediately instead of sitting on the previous one.
+    ///
+    /// `cancel` stops it between files (and aborts the file in flight). A cancelled download never
+    /// writes `.complete`, and every file lands atomically, so what it leaves behind is only ever
+    /// whole clips that the next download reuses — never a truncated one that looks cached.
     static func download(_ walk: RemoteWalk,
+                         cancel: Cancellation? = nil,
                          mapReady: @escaping (SoundMap) -> Void = { _ in },
                          progress: @escaping (Double) -> Void,
                          completion: @escaping (Result<Experience, Error>) -> Void) {
@@ -232,8 +238,14 @@ enum WalkDownloader {
                 let dir = cacheDir(for: walk.id)
                 try FileManager.default.createDirectory(at: dir.appendingPathComponent("audio"),
                                                         withIntermediateDirectories: true)
-                let mapData = try fetch(walk.mapUrl)
-                try mapData.write(to: dir.appendingPathComponent("map.json"))
+                // Un-mark the old revision before overwriting its map.json. Otherwise a download
+                // interrupted part-way (now likely: the walk's page starts one the listener may
+                // walk away from) leaves the new map beside a stale `.complete`, and
+                // `cachedExperience` would open it with clips that never arrived.
+                try? FileManager.default.removeItem(at: dir.appendingPathComponent(".complete"))
+                try? FileManager.default.removeItem(at: versionURL(walk.id))
+                let mapData = try fetch(walk.mapUrl, cancel: cancel)
+                try mapData.write(to: dir.appendingPathComponent("map.json"), options: .atomic)
                 let map = try JSONDecoder().decode(SoundMap.self, from: mapData)
                 DispatchQueue.main.async { mapReady(map) }
 
@@ -247,6 +259,7 @@ enum WalkDownloader {
                 }
                 let list = Array(rels)
                 for (i, rel) in list.enumerated() {
+                    if cancel?.isCancelled == true { throw CancellationError() }
                     let dest = dir.appendingPathComponent(rel)
                     // A clip already on disk is reused (a new clip means a new name). Everything
                     // else is fetched again, since an edited cover or label image keeps its name.
@@ -257,12 +270,13 @@ enum WalkDownloader {
                         let enc = rel.split(separator: "/").map {
                             $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0)
                         }.joined(separator: "/")
-                        let data = try fetch(walk.base + "/" + enc, cached: isAudio)
-                        try data.write(to: dest)
+                        let data = try fetch(walk.base + "/" + enc, cached: isAudio, cancel: cancel)
+                        try data.write(to: dest, options: .atomic)
                     }
                     let done = Double(i + 1) / Double(max(1, list.count))
                     DispatchQueue.main.async { progress(done) }
                 }
+                if cancel?.isCancelled == true { throw CancellationError() }   // e.g. Reset Cache mid-way
                 try? Data().write(to: dir.appendingPathComponent(".complete"))   // mark fully downloaded
                 try? (walk.updatedAt ?? "").write(to: versionURL(walk.id), atomically: true, encoding: .utf8)
                 let exp = Experience(id: walk.id, directory: dir, map: map)
@@ -281,23 +295,50 @@ enum WalkDownloader {
     /// map.json even though `updatedAt` had already said to re-download. Only audio may be cached:
     /// replacing a clip in the editor gives it a new file name, so a stale copy is never asked for.
     /// map.json, album art and label images keep their names when edited, so they always go to S3.
-    private static func fetch(_ urlString: String, cached: Bool = false) throws -> Data {
+    private static func fetch(_ urlString: String, cached: Bool = false,
+                              cancel: Cancellation? = nil) throws -> Data {
         guard let url = URL(string: urlString) else { throw URLError(.badURL) }
         var result: Data?
         var thrown: Error?
         let sem = DispatchSemaphore(value: 0)
         var req = URLRequest(url: url)
         if !cached { req.cachePolicy = .reloadIgnoringLocalCacheData }
-        URLSession.shared.dataTask(with: req) { data, resp, err in
+        let task = URLSession.shared.dataTask(with: req) { data, resp, err in
             if let err = err { thrown = err }
             else if let http = resp as? HTTPURLResponse, http.statusCode != 200 {
                 thrown = URLError(.init(rawValue: URLError.badServerResponse.rawValue))
             } else { result = data }
             sem.signal()
-        }.resume()
+        }
+        cancel?.track(task)
+        task.resume()
         sem.wait()
+        cancel?.track(nil)
         if let thrown = thrown { throw thrown }
         guard let data = result else { throw URLError(.cannotParseResponse) }
         return data
+    }
+
+    // MARK: - Cancellation
+
+    /// Lets the main thread stop a download running on a background queue. `fetch` blocks on a
+    /// semaphore, so a flag alone would only take effect after the current clip — which can be a
+    /// hundred megabytes — so the request in flight is cancelled too.
+    final class Cancellation {
+        private let lock = NSLock()
+        private var cancelled = false
+        private var task: URLSessionTask?
+
+        var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
+
+        func cancel() {
+            lock.lock(); cancelled = true; let t = task; lock.unlock()
+            t?.cancel()
+        }
+
+        fileprivate func track(_ t: URLSessionTask?) {
+            lock.lock(); task = t; let dead = cancelled; lock.unlock()
+            if dead { t?.cancel() }
+        }
     }
 }

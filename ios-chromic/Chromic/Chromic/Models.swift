@@ -269,6 +269,8 @@ struct SoundMap: Codable {
     }
     var dialoguePalette: DialogueColors { dialogueColors ?? DialogueColors() }
     var isFuzzy: Bool { displayStyle == "fuzzy" }
+    /// The creator as shown to the listener (see `Brand.displayCreator`); "" when absent.
+    var creatorText: String { Brand.displayCreator(creator) }
 }
 
 /// A loadable bundle on disk: a folder containing `map.json`, `audio/`, and optional album art.

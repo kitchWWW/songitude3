@@ -30,7 +30,7 @@ struct WalkIntroCard: View {
     static let followArtist = "artist"
     private var creator: String {
         let fromCatalog = remote?.creatorText ?? ""
-        return fromCatalog.isEmpty ? (experience.map.creator ?? "") : fromCatalog
+        return fromCatalog.isEmpty ? experience.map.creatorText : fromCatalog
     }
     private var about: String { (remote?.about?.isEmpty == false ? remote?.about : experience.map.about) ?? "" }
 

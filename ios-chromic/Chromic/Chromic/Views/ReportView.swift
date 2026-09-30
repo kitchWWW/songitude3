@@ -42,7 +42,7 @@ struct ReportView: View {
 
     private var walkName: String? { app.selectedExperience?.displayName }
     private var artistName: String? {
-        let c = app.currentRemoteWalk?.creatorText ?? app.selectedExperience?.map.creator ?? ""
+        let c = app.currentRemoteWalk?.creatorText ?? app.selectedExperience?.map.creatorText ?? ""
         return c.isEmpty ? nil : c
     }
     private var subjectName: String? {

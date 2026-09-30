@@ -3,6 +3,7 @@ package com.brianellissound.songitude
 import android.app.Application
 import com.brianellissound.songitude.audio.RenderEngine
 import com.brianellissound.songitude.data.WalkDownloader
+import com.brianellissound.songitude.data.WalkDownloads
 import com.brianellissound.songitude.location.SongitudeLocationManager
 import com.brianellissound.songitude.model.Experience
 import com.brianellissound.songitude.service.PlaybackService
@@ -34,6 +35,13 @@ class SongitudeApp : Application() {
      */
     @Volatile
     var loadedExperience: Experience? = null
+
+    /**
+     * Walk downloads in flight, started by a walk's page and joined by Start. Here for the same
+     * reason as the engine: the Activity (and its AppState) can be destroyed mid-download, and a
+     * `viewModelScope` download would die with it.
+     */
+    val downloads: WalkDownloads by lazy { WalkDownloads(WalkDownloader(this)) }
 
     override fun onCreate() {
         super.onCreate()

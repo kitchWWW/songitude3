@@ -6,9 +6,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -57,9 +60,22 @@ object Brand {
      *  (No Play listing for Songitude is public yet; the App Store page is the canonical one.) */
     const val SONGITUDE_URL = "https://apps.apple.com/app/id6787213575"
 
-    /** About's link icons. Neither is known yet, so both icons stay hidden until filled in. */
-    val INSTAGRAM_URL: String? = null
-    val WEBSITE_URL: String? = null
+    /** About's link icons (confirmed 2026-09-30). Nullable so a missing one hides its icon. */
+    val INSTAGRAM_URL: String? = "https://www.instagram.com/chromic_duo/"
+    val WEBSITE_URL: String? = "https://chromic.space"
+
+    // MARK: Flow
+
+    /**
+     * How long the app can sit in the background and still come back exactly where it was left.
+     * Longer than this, and with no walk under way, reopening starts over at the welcome page and
+     * lands on Soundwalks — the listener has most likely put the phone away and is coming back to
+     * choose a walk, not to finish reading a page they no longer remember opening. Five minutes
+     * covers answering a message or checking a map in another app. A walk in progress (playing, or
+     * its map on screen) is never reset, however long the phone was pocketed.
+     * Twin: `Brand.resumeWindow` on iOS.
+     */
+    const val RESUME_WINDOW_MS = 5 * 60 * 1000L
 
     // MARK: Type
 
@@ -99,6 +115,15 @@ object Brand {
     const val CARD_MEDIA_ASPECT = 360f / 188f
     val PAGE_INSET = 50.dp
     const val PAGE_MEDIA_ASPECT = 376f / 261f
+
+    /** Soundwalks' way back to About. It borrows the cloud the map's settings button wears, as a
+     *  matched pair, until Dorothy's gear arrives — then only the settings button changes (its
+     *  drawable is named in `MapScreen`), and this stays the cloud. Size and chip match that button. */
+    object AboutButton {
+        val ICON = R.drawable.icon_cloud
+        val ICON_HEIGHT = 20.dp
+        val SIZE = 44.dp
+    }
 }
 
 /** The still watercolor wash (Drive "Background/Combined Background.png"), scaled to fill. Behind
@@ -190,10 +215,16 @@ fun BrandPrimaryButton(text: String, modifier: Modifier = Modifier, enabled: Boo
     }
 }
 
+/** How a [ScreenHeader] draws its way back: Dorothy's chevron, or the map's cloud (Soundwalks → About). */
+enum class HeaderBack { Chevron, About }
+
 /** Screen title in the display face with an optional back chevron over its left edge — the header
- *  every catalog screen shares (Figma: title 40pt centred at y≈88; chevron 46×43 at x=16). */
+ *  every catalog screen shares (Figma: title 40pt centred at y≈88; chevron 46×43 at x=16).
+ *
+ *  Soundwalks goes back to About with the map's cloud instead ([HeaderBack.About]), on the same
+ *  44dp chip as the settings button so the two read as a pair. */
 @Composable
-fun ScreenHeader(title: String, onBack: (() -> Unit)? = null) {
+fun ScreenHeader(title: String, onBack: (() -> Unit)? = null, back: HeaderBack = HeaderBack.Chevron) {
     Box(
         Modifier.fillMaxWidth().statusBarsPadding().padding(top = 36.dp).heightIn(min = 60.dp),
         contentAlignment = Alignment.Center,
@@ -203,7 +234,24 @@ fun ScreenHeader(title: String, onBack: (() -> Unit)? = null) {
             maxLines = 2, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 62.dp),
         )
-        if (onBack != null) {
+        if (onBack != null && back == HeaderBack.About) {
+            // Same chip as MapScreen's GlassCircleButton (private there), so it matches settings.
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                tonalElevation = 3.dp,
+                onClick = onBack,
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 16.dp)
+                    .size(Brand.AboutButton.SIZE)
+                    .semantics { contentDescription = "About" },
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    BrandIcon(Brand.AboutButton.ICON, Brand.AboutButton.ICON_HEIGHT)
+                }
+            }
+        } else if (onBack != null) {
             Box(
                 Modifier
                     .align(Alignment.CenterStart)
@@ -228,3 +276,17 @@ fun ArtworkBox(aspect: Float, modifier: Modifier = Modifier, content: @Composabl
 
 /** Hairlines above and below a full-bleed image, as the mock draws its media frame. */
 fun Modifier.mediaHairlines(): Modifier = this.border(1.dp, Brand.Palette.cardStroke)
+
+/**
+ * The artist was "Chromic Duo" and is now just "Chromic". Walks already published under the old
+ * name carry it in their map.json and catalog entry, and those can't be re-published from the back
+ * end — so the app renames them for display instead. Every reader of a walk's creator or an
+ * artist's name goes through here (`RemoteWalk.creatorText`, `SoundMap.creatorText`,
+ * `ArtistProfile.displayName`); the stored and fetched data are never rewritten. Any other creator
+ * passes through untouched. Chromic-only — see `../SYNC.md`.
+ * Twin: `Brand.displayCreator(_:)` in `Brand.swift`.
+ */
+fun Brand.displayCreator(name: String?): String {
+    if (name == null) return ""
+    return if (name.trim().equals("Chromic Duo", ignoreCase = true)) Brand.NAME else name
+}

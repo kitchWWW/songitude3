@@ -85,7 +85,7 @@ struct SettingsView: View {
         Section("Report") {
             let walk = app.selectedExperience?.displayName
             let artist: String? = {
-                let c = app.currentRemoteWalk?.creatorText ?? app.selectedExperience?.map.creator ?? ""
+                let c = app.currentRemoteWalk?.creatorText ?? app.selectedExperience?.map.creatorText ?? ""
                 return c.isEmpty ? nil : c
             }()
             // A greyed row reads as a broken button. With no walk open there is simply nothing to
