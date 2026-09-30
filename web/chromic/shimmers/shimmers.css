@@ -1,103 +1,80 @@
-/* Shimmers in the Field QR pages. Chromic's type and watercolor backdrop (../index.html), one
-   centred column for a phone held in a park. Brighter than the marketing site on purpose: this is
-   the first thing someone sees after scanning a sign, so it should feel like the app — paint,
-   stickers, things that wiggle. */
+/* Shimmers in the Field QR pages. The palette, type and panels are the Chromic marketing site's
+   (../index.html), trimmed to one narrow column for a phone held in a park. */
 :root{
-  --ink:#1D1B20; --body:#1E1E1E; --muted:#49454F; --stroke:#CAC4D0;
-  --gold:#E5A000; --sun:#FFD23F; --coral:#FF5C8A; --peach:#FF9A5A;
-  --violet:#7B5CFA; --lilac:#C084FC; --mint:#2EC4A0; --sky:#3FA7FF;
+  --ink:#1D1B20; --body:#1E1E1E; --muted:#49454F; --card:#FEF7FF; --stroke:#CAC4D0;
+  --gold:#E5A000; --on-gold:#2C2C2C;
 }
 *{box-sizing:border-box}
 body{margin:0;color:var(--body);line-height:1.55;-webkit-font-smoothing:antialiased;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   background:#f7e7d6 url("../backdrop.jpg") center top/cover scroll;
-  -webkit-text-size-adjust:100%;text-align:center}
+  -webkit-text-size-adjust:100%}
 a{color:inherit}
 .display{font-family:"Julius Sans One",sans-serif;font-weight:400;text-transform:uppercase;letter-spacing:-.01em}
 .wrap{max-width:480px;margin:0 auto;padding:0 16px}
 
-.mark{display:block;padding:30px 0 4px;color:var(--ink);text-decoration:none;
-  font-size:clamp(46px,15vw,64px);line-height:1;letter-spacing:.04em}
+.mark{display:block;text-align:center;padding:28px 0 6px;color:var(--ink);text-decoration:none;
+  font-size:clamp(40px,13vw,56px);line-height:1}
 
-/* The walk, as a sticker: round, white-rimmed, a little crooked, bobbing, with a star stuck on. */
-.walk{display:flex;flex-direction:column;align-items:center;margin:18px 0 18px}
-.walk .pic{position:relative;width:148px;height:148px;margin-bottom:16px;animation:bob 4.5s ease-in-out infinite}
-.walk img{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block;background:#ECE6F0;
-  border:6px solid #fff;box-shadow:0 12px 30px rgba(123,92,250,.28);transform:rotate(-4deg)}
-.walk .pic::after{content:"";position:absolute;right:-14px;top:-10px;width:46px;height:45px;
-  background:url("../bg/star1.png") center/contain no-repeat;
-  filter:drop-shadow(0 2px 3px rgba(0,0,0,.25));animation:twinkle 3s ease-in-out infinite}
-.walk h1{margin:0;font-size:clamp(26px,8vw,34px);line-height:1.1;color:var(--ink)}
-.walk .by{margin:6px 0 0;font-size:15px;color:var(--muted)}
-.date{display:inline-block;margin:12px 0 0;padding:5px 14px;border-radius:999px;transform:rotate(-2deg);
-  background:var(--sun);color:var(--ink);font-size:13px;font-weight:700;letter-spacing:.06em;
-  text-transform:uppercase;box-shadow:0 4px 0 rgba(0,0,0,.12)}
+.panel{background:rgba(254,247,255,.9);border:1px solid var(--stroke);border-radius:20px;padding:20px}
 
-.lede{margin:0 auto 22px;max-width:30em;font-size:18px;color:var(--ink)}
+/* The walk card at the top of each page. */
+.walk{display:flex;gap:14px;align-items:center;margin:18px 0 20px}
+.walk img{width:84px;height:84px;border-radius:14px;object-fit:cover;flex:none;background:#ECE6F0}
+.walk h1{margin:0;font-size:clamp(22px,6.4vw,28px);line-height:1.15;color:var(--ink)}
+.walk .by{margin:4px 0 0;font-size:15px;color:var(--muted)}
+
+.lede{margin:0 0 20px;font-size:17px;color:var(--ink);text-align:center}
+.lede + .lede{margin-top:-8px}
 .muted{color:var(--muted)}
 
-.panel{background:rgba(255,255,255,.72);border-radius:26px;padding:20px 20px 22px;
-  box-shadow:0 8px 24px rgba(0,0,0,.08);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
-.thanks{margin:0;font-size:15px;color:var(--muted)}
-
-h2{margin:0 0 14px;font-size:22px;color:var(--ink)}
-
-/* The two choices and every download button: big, bright, one-thumb, a touch tilted. */
-.choices{display:grid;gap:16px;margin:0 0 24px}
-.big{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  min-height:100px;padding:16px 24px;border-radius:28px;color:#fff;text-decoration:none;line-height:1.2;
-  background:linear-gradient(135deg,var(--ink),#3a3540);
-  box-shadow:0 6px 0 rgba(0,0,0,.18),0 14px 28px rgba(0,0,0,.16);
-  -webkit-tap-highlight-color:transparent;transition:transform .15s cubic-bezier(.3,1.6,.5,1)}
-.big.apple{background:linear-gradient(135deg,var(--coral),var(--peach));transform:rotate(-1.2deg)}
-.big.play{background:linear-gradient(135deg,var(--violet),var(--sky));transform:rotate(1.2deg)}
-.big:hover{transform:rotate(0) scale(1.02)}
-.big:active{transform:rotate(0) scale(.96) translateY(3px);box-shadow:0 2px 0 rgba(0,0,0,.18),0 8px 18px rgba(0,0,0,.14)}
-.big:focus-visible{outline:4px solid var(--sun);outline-offset:4px}
-.big .label{display:flex;align-items:center;gap:14px;font-size:32px;font-weight:700;letter-spacing:-.01em;
-  text-shadow:0 2px 0 rgba(0,0,0,.12)}
-.big .logo{width:32px;height:32px;flex:none;filter:drop-shadow(0 2px 0 rgba(0,0,0,.12))}
-.big small{display:block;margin-top:6px;font-size:15px;opacity:.92}
-/* The platform the user agent claims wears a sticker; the other stays just as usable. */
+/* The two choices, and every download button: big, dark, one-thumb. */
+.choices{display:grid;gap:14px;margin:0 0 20px}
+.big{position:relative;display:flex;flex-direction:column;justify-content:center;min-height:104px;padding:16px 24px;
+  border-radius:20px;background:var(--ink);color:#fff;text-decoration:none;line-height:1.2;
+  box-shadow:0 10px 28px rgba(0,0,0,.18);-webkit-tap-highlight-color:transparent;
+  transition:transform .12s ease}
+.big:active{transform:scale(.98)}
+.big:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
+.big .label{display:flex;align-items:center;gap:14px;font-size:32px;font-weight:600;letter-spacing:-.01em}
+.big .logo{width:30px;height:30px;flex:none}
+.big small{display:block;margin-top:6px;font-size:15px;opacity:.82}
 .big .yours{display:none;position:absolute;top:-12px;right:14px;padding:4px 12px;border-radius:999px;
-  transform:rotate(6deg);background:var(--sun);color:var(--ink);font-size:12px;font-weight:800;
+  transform:rotate(6deg);background:#FFD23F;color:var(--ink);font-size:12px;font-weight:800;
   letter-spacing:.06em;text-transform:uppercase;box-shadow:0 3px 0 rgba(0,0,0,.15)}
+/* The platform the user agent claims gets the site's gold; the other stays fully usable. */
+.big.match{background:var(--gold);color:var(--on-gold)}
+.big.match small{opacity:.9}
 .big.match .yours{display:inline-block}
-.big.match{animation:nudge 3.2s ease-in-out 1s infinite}
+.big.match:focus-visible{outline-color:var(--ink)}
 
-/* Numbered steps: a bright bubble over each one, colours walking through the palette. */
-.steps{list-style:none;margin:0;padding:0;counter-reset:s;display:grid;gap:18px}
-.steps li{display:flex;flex-direction:column;align-items:center;gap:2px}
-.steps li::before{counter-increment:s;content:counter(s);display:grid;place-items:center;
-  width:44px;height:44px;margin-bottom:6px;border-radius:50%;color:#fff;background:var(--coral);
-  font-family:"Julius Sans One",sans-serif;font-size:24px;line-height:1;box-shadow:0 4px 0 rgba(0,0,0,.14)}
-.steps li:nth-child(2)::before{background:var(--gold)}
-.steps li:nth-child(3)::before{background:var(--mint)}
-.steps li:nth-child(4)::before{background:var(--violet)}
-.steps b{color:var(--ink);font-size:18px;font-weight:700}
-.steps span{color:var(--muted);font-size:15px;max-width:26em}
+/* The chooser's two buttons: one colour per platform, taken from the watercolor, whether or not
+   it's the visitor's phone. The match is marked by the pill alone. */
+.big.apple,.big.apple.match{background:linear-gradient(135deg,#FF5C8A,#FF9A5A);color:#fff}
+.big.play,.big.play.match{background:linear-gradient(135deg,#7B5CFA,#3FA7FF);color:#fff}
 
+/* Numbered steps, styled like the marketing site's "How to experience it". */
+.steps{list-style:none;margin:0;padding:0;counter-reset:s}
+.steps li{display:grid;grid-template-columns:40px 1fr;gap:4px 12px;padding:14px 0;border-top:1px solid var(--stroke)}
+.steps li:first-child{border-top:0;padding-top:0}
+.steps li:last-child{padding-bottom:0}
+.steps li::before{counter-increment:s;content:counter(s);grid-row:span 2;
+  font-family:"Julius Sans One",sans-serif;font-size:30px;line-height:1;color:var(--gold)}
+.steps b{color:var(--ink);font-size:18px;font-weight:600}
+.steps span{color:var(--muted);font-size:15px}
+
+h2{margin:0 0 14px;font-size:22px;color:var(--ink);text-align:center}
 .tip{margin:20px 0 0}
-.tip p{margin:0 0 10px;font-size:16px}
+.tip p{margin:0 0 10px;font-size:15px}
 .tip p:last-child{margin:0}
 
-.alt{display:block;margin:18px 0 0;font-size:15px;color:var(--ink);font-weight:600}
+.alt{display:block;text-align:center;margin:18px 0 0;font-size:15px;color:var(--ink);font-weight:600}
 
-.back{display:inline-flex;align-items:center;gap:6px;min-height:44px;margin-top:10px;padding:4px 14px;
-  border-radius:999px;background:rgba(255,255,255,.7);font-size:15px;color:var(--ink);
-  text-decoration:none;font-weight:600}
-.back:hover,.back:focus-visible{background:#fff}
+.back{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 4px;
+  font-size:16px;color:var(--ink);text-decoration:none;font-weight:600}
+.back:hover,.back:focus-visible{text-decoration:underline}
 
-footer{padding:28px 0 40px;font-size:14px;color:var(--muted)}
+footer{padding:28px 0 40px;font-size:14px;color:var(--muted);text-align:center}
 footer a{text-decoration:none}
 footer a:hover{color:var(--ink)}
 footer .row{display:flex;gap:6px 16px;flex-wrap:wrap;justify-content:center}
-
-@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
-@keyframes twinkle{0%,100%{transform:rotate(0) scale(1)}50%{transform:rotate(18deg) scale(1.15)}}
-@keyframes nudge{0%,88%,100%{transform:rotate(-1.2deg)}92%{transform:rotate(1.5deg) scale(1.02)}96%{transform:rotate(-2deg)}}
-.big.play.match{animation-name:nudge-r}
-@keyframes nudge-r{0%,88%,100%{transform:rotate(1.2deg)}92%{transform:rotate(-1.5deg) scale(1.02)}96%{transform:rotate(2deg)}}
-@media (prefers-reduced-motion:reduce){
-  .walk .pic,.walk .pic::after,.big.match{animation:none}
-}
