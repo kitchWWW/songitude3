@@ -36,7 +36,8 @@ a{color:inherit}
   transition:transform .12s ease}
 .big:active{transform:scale(.98)}
 .big:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
-.big .label{font-size:32px;font-weight:600;letter-spacing:-.01em}
+.big .label{display:flex;align-items:center;gap:14px;font-size:32px;font-weight:600;letter-spacing:-.01em}
+.big .logo{width:30px;height:30px;flex:none}
 .big small{display:block;margin-top:6px;font-size:15px;opacity:.82}
 .big .yours{display:none;align-self:flex-start;margin-bottom:6px;padding:2px 10px;border-radius:999px;
   font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:var(--on-gold);color:#fff}
