@@ -54,6 +54,29 @@ a{color:inherit}
 .big.play,.big.play.match{background:linear-gradient(135deg,#7B5CFA,#3FA7FF);color:#fff}
 .big.apple,.big.play{align-items:center}
 
+/* The download button on each phone's page: a store listing row in that platform's own idiom
+   (icon, name, subtitle, a blue Get/Install pill) so it reads as "this is the app", not as
+   another of our coloured buttons. The whole card is the link. */
+.getapp{display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:20px;
+  background:#fff;color:#1D1D1F;text-decoration:none;line-height:1.25;
+  box-shadow:0 1px 2px rgba(0,0,0,.08),0 10px 28px rgba(0,0,0,.14);
+  -webkit-tap-highlight-color:transparent;transition:transform .12s ease}
+.getapp:active{transform:scale(.98)}
+.getapp:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
+.getapp img{width:64px;height:64px;flex:none;border-radius:22.5%;
+  box-shadow:inset 0 0 0 .5px rgba(0,0,0,.1)}
+.getapp .name{flex:1;min-width:0}
+.getapp b{display:block;font-size:19px;font-weight:600;letter-spacing:-.01em}
+.getapp small{display:block;margin-top:2px;font-size:14px;color:#6E6E73}
+.getapp .get{flex:none;padding:7px 20px;border-radius:999px;font-size:16px;font-weight:700;
+  background:#007AFF;color:#fff}
+/* Google Play: Material type and shapes, Google blue. */
+.getapp.android{border-radius:16px;font-family:Roboto,"Google Sans",system-ui,sans-serif}
+.getapp.android img{border-radius:20%}
+.getapp.android b{font-weight:500}
+.getapp.android small{color:#5F6368}
+.getapp.android .get{padding:9px 22px;font-size:15px;font-weight:500;background:#0B57D0;border-radius:999px}
+
 /* Numbered steps, styled like the marketing site's "How to experience it". */
 .steps{list-style:none;margin:0;padding:0;counter-reset:s}
 .steps li{display:grid;grid-template-columns:40px 1fr;gap:4px 12px;padding:14px 0;border-top:1px solid var(--stroke)}
