@@ -40,12 +40,19 @@
     .hero h1{font-size:clamp(44px,9vw,88px);line-height:1;margin:28px 0 8px;color:var(--ink)}
     .hero .tag{font-size:clamp(18px,3.4vw,26px);margin:0 0 18px;color:var(--ink)}
     .hero .lede{font-size:clamp(17px,2.2vw,20px);max-width:620px;margin:0 auto 32px;color:var(--muted)}
-    .stores{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
-    .store{display:inline-flex;flex-direction:column;align-items:flex-start;min-width:190px;
-      padding:10px 20px;border-radius:14px;background:var(--ink);color:#fff;text-decoration:none;line-height:1.25}
-    .store small{font-size:11px;opacity:.75;letter-spacing:.04em;text-transform:uppercase}
-    .store span{font-size:19px;font-weight:600}
-    .store.soon{opacity:.55;cursor:default}
+    /* The QR page's chooser buttons (shimmers/shimmers.css), at hero size. Each leads to that
+       page's per-phone instructions rather than straight to a store. */
+    .stores{display:grid;grid-template-columns:repeat(2,minmax(0,230px));gap:14px;justify-content:center}
+    .store{display:flex;flex-direction:column;align-items:center;justify-content:center;
+      padding:14px 18px;border-radius:20px;color:#fff;text-decoration:none;line-height:1.2;
+      box-shadow:0 10px 28px rgba(0,0,0,.18);-webkit-tap-highlight-color:transparent;transition:transform .12s ease}
+    .store:active{transform:scale(.98)}
+    .store:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
+    .store .label{display:flex;align-items:center;gap:12px;font-size:26px;font-weight:600;letter-spacing:-.01em}
+    .store .logo{width:26px;height:26px;flex:none}
+    .store small{margin-top:4px;font-size:13px;opacity:.9}
+    .store.apple{background:linear-gradient(135deg,#FF5C8A,#FF9A5A)}
+    .store.play{background:linear-gradient(135deg,#7B5CFA,#3FA7FF)}
 
     section{padding:64px 0}
     h2{font-size:clamp(30px,5vw,40px);margin:0 0 10px;color:var(--ink);text-align:center}
@@ -89,6 +96,10 @@
       .about h2{text-align:center}
       .events li{grid-template-columns:1fr;gap:2px}
       header a.nav{display:none}
+      .stores{gap:10px}
+      .store{padding:12px 10px;border-radius:16px}
+      .store .label{font-size:clamp(18px,5.4vw,24px);gap:8px}
+      .store .logo{width:20px;height:20px}
       .panel{padding:20px}
       body{background-attachment:scroll}
     }
@@ -134,8 +145,12 @@
       <p class="tag display">A World of Stories</p>
       <p class="lede">Immersive stories, sounds, and music that bring the places around you to life.</p>
       <div class="stores">
-        <span class="store soon" aria-disabled="true"><small>Coming in October to the</small><span>App Store</span></span>
-        <span class="store soon" aria-disabled="true"><small>Coming in October to</small><span>Google Play</span></span>
+        <a class="store apple" href="shimmers/ios.html">
+          <span class="label"><svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></svg>iPhone</span><small>App Store</small>
+        </a>
+        <a class="store play" href="shimmers/android.html">
+          <span class="label"><svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M22.018 13.298l-3.919 2.218-3.515-3.493 3.543-3.521 3.891 2.202a1.49 1.49 0 0 1 0 2.594zM1.337.924a1.486 1.486 0 0 0-.112.568v21.017c0 .217.045.419.124.6l11.155-11.087L1.337.924zm12.207 10.065l3.258-3.238L3.45.195a1.466 1.466 0 0 0-.946-.179l11.04 10.973zm0 2.067l-11 10.933c.298.036.612-.016.906-.183l13.324-7.54-3.23-3.21z"/></svg>Android</span><small>Google Play</small>
+        </a>
       </div>
     </div>
 
