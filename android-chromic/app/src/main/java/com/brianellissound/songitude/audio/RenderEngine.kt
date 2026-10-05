@@ -214,7 +214,30 @@ class RenderEngine(private val context: Context) {
 
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var focusRequest: AudioFocusRequest? = null
-    private var wasInterrupted = false
+
+    /**
+     * Torn down by a transient focus loss (a call, Siri, Gemini) and waiting to come back.
+     * `isRunning` stays true through this so the walk resumes in place — the foreground service and
+     * its location grant survive, which a pause-and-restart from the background would not.
+     *
+     * Published separately so the transport can be honest: while this is set nothing is sounding,
+     * and the button and lock screen read "play". Gemini proved it can take focus and never give it
+     * back, which left the button reading "pause" over silence indefinitely.
+     */
+    private val _isInterrupted = MutableStateFlow(false)
+    val isInterrupted: StateFlow<Boolean> = _isInterrupted.asStateFlow()
+
+    /** Fired when [isInterrupted] changes, so the notification can follow it. */
+    var onInterruptedChanged: ((Boolean) -> Unit)? = null
+
+    private var wasInterrupted: Boolean
+        get() = _isInterrupted.value
+        set(v) {
+            if (_isInterrupted.value != v) {
+                _isInterrupted.value = v
+                onInterruptedChanged?.invoke(v)
+            }
+        }
 
     /** Master gain applied to the finished mix while another app is ducking us. */
     @Volatile
@@ -301,12 +324,26 @@ class RenderEngine(private val context: Context) {
      * If the mixer died while we were away — the track was reclaimed, the process was frozen
      * part-way through a teardown — `isRunning` would otherwise keep claiming to play over silence,
      * and the button would read "pause" and do nothing. Ported from iOS's handleForeground.
+     *
+     * An interrupted walk is resumed instead: coming back to the app is the listener choosing it
+     * over whatever took the audio. iOS never needs this, because every interruption there ends
+     * with an `.ended`; on Android an app like Gemini can take focus and never return it.
      */
     fun reconcileOnForeground() {
         main.post {
-            if (!_isRunning.value || wasInterrupted) return@post
+            if (!_isRunning.value) return@post
+            if (wasInterrupted) { resumeFromInterruption(); return@post }
             if (track == null || !mixing.get()) handleRemoteTransport(false)
         }
+    }
+
+    /**
+     * Take the audio back after a transient loss. If it is refused — a call still in progress — the
+     * walk keeps waiting, and AUDIOFOCUS_GAIN brings it back when the call ends.
+     */
+    private fun resumeFromInterruption() {
+        if (!_isRunning.value || !wasInterrupted) return
+        if (bringUpAudio()) wasInterrupted = false
     }
 
     // MARK: - Loading
@@ -342,7 +379,8 @@ class RenderEngine(private val context: Context) {
     // MARK: - Transport
 
     fun start() {
-        if (_isRunning.value) return
+        // Already running but silenced by an interruption: play means "take the audio back".
+        if (_isRunning.value) { resumeFromInterruption(); return }
         wasInterrupted = false
         setRunning(true)          // set before bring-up so the isRunning-gated helpers run
         if (bringUpAudio()) {
@@ -363,7 +401,7 @@ class RenderEngine(private val context: Context) {
         abandonFocus()
     }
 
-    fun toggle() { if (_isRunning.value) stop() else start() }
+    fun toggle() { if (_isRunning.value && !wasInterrupted) stop() else start() }
 
     private fun setRunning(v: Boolean) {
         if (_isRunning.value != v) {
@@ -377,7 +415,9 @@ class RenderEngine(private val context: Context) {
             .setUsage(AudioAttributes.USAGE_MEDIA)
             .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
             .build()
-        val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+        // Reuse the request already in the focus stack: a second one would leave the first behind,
+        // never abandoned, still holding a listener.
+        val req = focusRequest ?: AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
             .setAudioAttributes(attrs)
             .setOnAudioFocusChangeListener(focusListener, main)
             .setWillPauseWhenDucked(false)
@@ -1240,7 +1280,7 @@ class RenderEngine(private val context: Context) {
      *  unplugged route. */
     fun handleRemoteTransport(play: Boolean?) {
         main.post {
-            val wantsPlay = play ?: !_isRunning.value
+            val wantsPlay = play ?: !(_isRunning.value && !wasInterrupted)
             val toggle = remoteToggle
             if (toggle != null) toggle(wantsPlay)
             else if (wantsPlay) start() else stop()

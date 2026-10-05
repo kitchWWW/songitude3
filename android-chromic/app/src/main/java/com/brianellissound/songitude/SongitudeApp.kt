@@ -54,5 +54,9 @@ class SongitudeApp : Application() {
             // screen to resume from — the way iOS keeps its Now Playing entry at a rate of 0.
             if (running) PlaybackService.start(this) else PlaybackService.pause(this)
         }
+        // An interruption doesn't stop the service (the walk must be able to resume in place), but
+        // the lock-screen control has to stop claiming to play.
+        // Only while running: refreshing a stopped walk would start the service and resurrect it.
+        engine.onInterruptedChanged = { if (engine.isRunning.value) PlaybackService.refresh(this) }
     }
 }

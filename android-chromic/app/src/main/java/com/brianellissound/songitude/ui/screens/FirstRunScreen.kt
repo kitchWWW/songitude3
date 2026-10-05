@@ -143,9 +143,20 @@ private fun PermissionBlock(
             if (step == FirstRunStep.LOCATION) {
                 // Why we are about to ask. Describes the app's own behaviour and nothing about the
                 // dialog that follows or how to answer it.
+                //
+                // This is also Play's Prominent Disclosure, so the wording is load-bearing: Songitude
+                // 1.0.1 was rejected (Inadequate Prominent Disclosure, Oct 2026) for not naming
+                // *location data* or its locked-screen use. It must say what is collected, how it is
+                // used and shared, and that it runs with the screen locked — all above the button.
                 Text(
-                    "${Brand.NAME} needs your location to play the sounds placed around you and follow you as you walk.",
+                    "${Brand.NAME} uses your location data to play the sounds placed around you and follow you as you walk, " +
+                        "including while a walk plays with your screen locked or the phone in your pocket.",
                     style = Brand.body(16, FontWeight.SemiBold).copy(color = Brand.Palette.bodyText),
+                    textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 4.dp),
+                )
+                Text(
+                    "Your location stays on this phone. It is never uploaded, stored or shared.",
+                    style = Brand.body(14).copy(color = Brand.Palette.bodyText),
                     textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 4.dp),
                 )
             } else {
@@ -162,7 +173,7 @@ private fun PermissionBlock(
                 )
                 Column(Modifier.fillMaxWidth().padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Bullet("For the best experience, you might want to lock your phone and put it in your pocket.")
-                    Bullet("In order to keep giving you location-accurate audio, we need permission to run in the background.")
+                    Bullet("Allowing notifications lets ${Brand.NAME} show playback controls on your lock screen, so the walk keeps going with the screen off.")
                 }
                 Text(
                     "We will never send you a notification. Nothing is ever pushed at you — no alerts, no announcements, no reminders.",

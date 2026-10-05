@@ -54,7 +54,11 @@ fun MapScreen(
     val offset by app.offset.collectAsState()
     val sounding by app.engine.soundingShapeIds.collectAsState()
     val dialogueStates by app.engine.dialogueStates.collectAsState()
-    val isRunning by app.engine.isRunning.collectAsState()
+    // Silenced by another app (a call, Gemini) reads as paused, so the button never shows "pause"
+    // over silence. See RenderEngine.isInterrupted.
+    val engineRunning by app.engine.isRunning.collectAsState()
+    val interrupted by app.engine.isInterrupted.collectAsState()
+    val isRunning = engineRunning && !interrupted
     val canEnd by app.engine.canEndSession.collectAsState()
     val downloadingId by app.downloadingWalkId.collectAsState()
     val progress by app.downloadProgress.collectAsState()
@@ -65,8 +69,7 @@ fun MapScreen(
     val appearance by app.appearance.collectAsState()
     val here by app.location.location.collectAsState()
     val auth by app.location.authorization.collectAsState()
-    val locationAuthorized = auth == SongitudeLocationManager.Authorization.WHEN_IN_USE ||
-        auth == SongitudeLocationManager.Authorization.ALWAYS
+    val locationAuthorized = auth == SongitudeLocationManager.Authorization.WHEN_IN_USE
 
     val dark = isDarkTheme(appearance)
     val context = LocalContext.current

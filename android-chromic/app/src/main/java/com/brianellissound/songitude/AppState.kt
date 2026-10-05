@@ -741,7 +741,8 @@ class AppState(app: Application) : AndroidViewModel(app) {
 
     fun togglePlayback() {
         if (!location.isAuthorized) { _showPermissionDeniedAlert.value = true; return }
-        if (engine.isRunning.value) {
+        // Interrupted counts as paused: the button reads "play" then, and play takes the audio back.
+        if (engine.isRunning.value && !engine.isInterrupted.value) {
             engine.stop(); location.stop(); stopSlew()
         } else {
             location.start(); engine.start(); primeEngineWithCurrentLocation()

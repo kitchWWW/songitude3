@@ -20,7 +20,8 @@ Expected, permanent differences — do not "fix" these when diffing:
 - `app/build.gradle.kts`: `applicationId`, `versionCode`/`versionName` (reset to 1 / 1.0).
 - `res/`: `strings.xml` (app name), `colors.xml`, `themes.xml` (launch), `drawable/launch_splash.xml`,
   `drawable/ic_notification.xml`, the adaptive icon (`mipmap-anydpi-v26`, `drawable-nodpi/ic_launcher_*`),
-  everything in `drawable-nodpi/` and `font/`. Songitude's `ic_launcher_*.xml` / `splash_mark.xml`
+  everything in `drawable-nodpi/` and `font/`. `raw/resume_needs_app.mp3` is regenerated in the same ElevenLabs voice
+  (River) saying "Chromic" where Songitude's says "Songitude" — never copy it across. Songitude's `ic_launcher_*.xml` / `splash_mark.xml`
   vectors are gone.
 - `MainActivity.kt`: **rewritten** root — `FirstRun` (the welcome + the two permission pages, the
   permission plumbing itself verbatim from Songitude, each page skipped when already granted),
@@ -52,6 +53,10 @@ Expected, permanent differences — do not "fix" these when diffing:
   the Application-scoped download alone would fix the same Activity-death trap there. The walk
   page's button always reads "Start" (was "Open map" for the loaded walk; it still just returns
   to the map).
+- `ui/screens/FirstRunScreen.kt` carries the Play Prominent Disclosure for location (Songitude's is
+  `OnboardingScreen.kt`). Both must name *location data*, its locked-screen use, and that it is never
+  shared, above the Continue button — Songitude 1.0.1 was rejected for less. No background location
+  is requested in either app.
 - Chromic-only files: `ui/Brand.kt`, `ui/screens/FirstRunScreen.kt`, `AboutScreen.kt`,
   `SoundwalksScreen.kt`, `WalkDetailScreen.kt`, `data/WalkDownloads.kt`, `ui/SquiggleField.kt`.
 - `ui/SquiggleField.kt`: the landing's drifting squiggles, lifted out of `FirstRunScreen.kt` so
