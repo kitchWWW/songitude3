@@ -27,7 +27,7 @@
   <div class="wrap">
     <a class="home" href="/">← Songitude</a>
     <h1>Privacy Policy</h1>
-    <p class="updated">Last updated: September 12, 2026</p>
+    <p class="updated">Last updated: October 4, 2026</p>
 
     <p>Songitude is a location-based audio experience: it plays different sounds depending on where
       you are physically standing. This policy explains exactly what data is involved.</p>
@@ -51,8 +51,10 @@
       single purpose: choosing what you hear as you move. Location access starts when you press
       play and stops when you stop the walk, quit the app, or the walk ends. When nothing is
       playing, the app does not read your location at all.</p>
-    <p>On Android this runs as a foreground service, which is why a persistent notification is
-      shown while a walk plays. That notification is the lock-screen transport (pause, skip) and
+    <p>On Android this needs only the &ldquo;while using the app&rdquo; location permission: the
+      walk runs as a foreground service that you start by pressing play, which is why a persistent
+      notification is shown while a walk plays. The Android app never asks for &ldquo;allow all the
+      time&rdquo; location access. That notification is the lock-screen transport (pause, skip) and
       the only notification the app ever shows &mdash; we send no alerts, reminders or messages.</p>
 
     <h2>Compass heading</h2>
@@ -98,8 +100,9 @@
 
     <h2>Permissions the apps ask for</h2>
     <ul>
-      <li><b>Location (precise, and in the background)</b> — to play the right sounds for where
-        you are, while a walk is playing. See above.</li>
+      <li><b>Location (precise)</b> — to play the right sounds for where you are, while a walk is
+        playing, including with the screen locked. On iOS this is the &ldquo;Always&rdquo; grant; on
+        Android it is &ldquo;while using the app&rdquo; only. See above.</li>
       <li><b>Notifications (Android)</b> — solely so the playback notification can be shown while
         a walk plays. Nothing else is ever sent.</li>
       <li><b>Network</b> — to download walks from the public catalog. Walks are downloaded in full

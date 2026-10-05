@@ -9,6 +9,9 @@ How this gets read back:
   · Leave a field empty to drop it entirely.
   · Blank lines between paragraphs are kept.
 
+Screen 1 is Play's Prominent Disclosure: it must say "location data", how it is used and
+shared, and that it is used with the screen locked. Play rejected 1.0.1 for vaguer wording.
+
 Both advance buttons must keep saying "Continue" — App Review rejected "Enable"
 on iOS under Guideline 5.1.1(iv) for dressing an advance button up as consent.
 
@@ -22,9 +25,9 @@ SUBTITLE:
 music on the map
 
 BODY:
-- your position changes the music you hear
-- Songitude only uses your location locally on this phone
-- It is never uploaded, stored or shared.
+- Songitude uses your location data to choose what you hear: your position decides which sounds play and how loud.
+- It is used while a walk is playing, including when your screen is locked or the phone is in your pocket.
+- Your location stays on this phone. It is never uploaded, stored or shared.
 
 FOOTNOTE:
 
@@ -46,7 +49,7 @@ So the music keeps playing.
 
 BODY:
 - For the best experience, you might want to lock your phone and put it in your pocket.
-- In order to keep giving you location-accurate audio, we need permission to run in the background.
+- Allowing notifications lets Songitude show playback controls on your lock screen, so the walk keeps going with the screen off.
 
 FOOTNOTE:
 We will never send you a notification. 

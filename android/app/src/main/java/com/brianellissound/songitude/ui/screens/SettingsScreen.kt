@@ -56,7 +56,6 @@ fun SettingsScreen(app: AppState, onClose: () -> Unit) {
                 trailingContent = {
                     Text(
                         when (auth) {
-                            SongitudeLocationManager.Authorization.ALWAYS -> "Always"
                             SongitudeLocationManager.Authorization.WHEN_IN_USE -> "While using"
                             SongitudeLocationManager.Authorization.DENIED -> "Denied"
                             SongitudeLocationManager.Authorization.NOT_DETERMINED -> "Not set"

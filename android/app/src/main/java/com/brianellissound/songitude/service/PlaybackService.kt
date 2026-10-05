@@ -7,6 +7,8 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.AudioAttributes
+import android.media.MediaPlayer
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -30,6 +32,13 @@ import com.brianellissound.songitude.SongitudeApp
 class PlaybackService : Service() {
 
     private lateinit var session: MediaSessionCompat
+
+    /** Non-null while the "open the app to resume" message is speaking; see [refuseBackgroundResume]. */
+    private var notice: MediaPlayer? = null
+
+    /** Already foreground: a refresh only redraws. Re-promoting with the location type from the
+     *  background is exactly what Android can refuse, and that must not read as a refused resume. */
+    private var inForeground = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -60,14 +69,31 @@ class PlaybackService : Service() {
         }
         val title = app.engine.let { "Songitude" }
         val running = app.engine.isRunning.value
-        val notification = buildNotification(running)
+        // What the listener hears, which is what the transport shows. Still foreground while
+        // interrupted, so the walk can come back in place.
+        val sounding = running && !app.engine.isInterrupted.value
+        val notification = buildNotification(sounding)
 
-        if (running) {
+        if (running && inForeground) {
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .notify(NOTIFICATION_ID, notification)
+        } else if (running) {
             val types = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
             } else 0
-            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, types)
+            try {
+                ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, types)
+                inForeground = true
+            } catch (e: SecurityException) {
+                refuseBackgroundResume()
+                return START_STICKY
+            }
+        } else if (notice != null) {
+            // The walk was just paused by refuseBackgroundResume. Stay foreground until the message
+            // finishes, or Android may cut it off mid-sentence.
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .notify(NOTIFICATION_ID, notification)
         } else {
             // Paused: stop being a foreground service — nothing is playing and nothing needs the
             // process kept alive — but leave the notification standing, detached, so the transport
@@ -77,6 +103,7 @@ class PlaybackService : Service() {
             // removed the only control that could start the walk again, so a pause was effectively
             // a stop. iOS keeps its Now Playing entry with a rate of 0 for the same reason.
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_DETACH)
+            inForeground = false
             (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
                 .notify(NOTIFICATION_ID, notification)
         }
@@ -92,13 +119,59 @@ class PlaybackService : Service() {
                         PlaybackStateCompat.ACTION_PLAY_PAUSE or PlaybackStateCompat.ACTION_STOP
                 )
                 .setState(
-                    if (running) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED,
+                    if (sounding) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED,
                     PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
                     1f,
                 )
                 .build()
         )
         return START_STICKY
+    }
+
+    /**
+     * Play was pressed from somewhere Android doesn't count as the user being in the app — a
+     * headset or Bluetooth button after a pause — so it refused a location foreground service.
+     *
+     * We only hold while-in-use location (background location got 1.0.1 rejected on Play). Resuming
+     * anyway would play a walk that can no longer hear where the listener is, so instead the walk
+     * stays paused and a spoken message asks them to open the app. Interacting with the
+     * notification is exempt and never lands here. iOS has no equivalent: "Always" is granted there.
+     */
+    private fun refuseBackgroundResume() {
+        (application as SongitudeApp).engine.handleRemoteTransport(false)
+        // startForegroundService was already called, so the service must go foreground or Android
+        // kills the app. Media playback alone needs no location grant.
+        val types = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+        } else 0
+        ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(false), types)
+        if (notice != null) return
+
+        val afd = resources.openRawResourceFd(R.raw.resume_needs_app)
+        notice = MediaPlayer().apply {
+            setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+            afd.close()
+            setOnCompletionListener { finishNotice() }
+            setOnErrorListener { _, _, _ -> finishNotice(); true }
+            prepare()
+            start()
+        }
+    }
+
+    /** The message is over: back to the paused state, notification left standing to resume from. */
+    private fun finishNotice() {
+        notice?.release()
+        notice = null
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_DETACH)
+        inForeground = false
+        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+            .notify(NOTIFICATION_ID, buildNotification(false))
     }
 
     private fun buildNotification(running: Boolean): android.app.Notification {
@@ -152,6 +225,8 @@ class PlaybackService : Service() {
     }
 
     override fun onDestroy() {
+        notice?.release()
+        notice = null
         session.isActive = false
         session.release()
         super.onDestroy()
@@ -186,6 +261,12 @@ class PlaybackService : Service() {
         /** Playback paused. The service is told, rather than killed, so its notification survives
          *  as something to resume from. */
         fun pause(context: Context) {
+            val i = Intent(context, PlaybackService::class.java).setAction(ACTION_REFRESH)
+            runCatching { context.startService(i) }
+        }
+
+        /** Redraw the notification after an interruption begins or ends; changes nothing else. */
+        fun refresh(context: Context) {
             val i = Intent(context, PlaybackService::class.java).setAction(ACTION_REFRESH)
             runCatching { context.startService(i) }
         }

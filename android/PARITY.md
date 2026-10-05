@@ -25,7 +25,7 @@ bug, a deliberate platform difference, or an approximation. Status is updated as
 | Difference | Why |
 |---|---|
 | Foreground service with a persistent notification | Android will not keep audio and GPS alive in the background without one. It doubles as the lock-screen transport, standing in for `MPNowPlayingInfoCenter`. |
-| Background location opens system Settings | Android 11+ refuses to grant it from a dialog. |
+| Only while-in-use location, never "Allow all the time" | The location-type foreground service keeps GPS alive with the screen off on the while-in-use grant, and Play rejected 1.0.1 (Inadequate Prominent Disclosure) for the background request on top of it. The cost: Android refuses to start that service from a headset button after a pause, so the walk stays paused and a spoken message asks the listener to open the app (`PlaybackService.refuseBackgroundResume`). |
 | Uninstall is a button with a confirm, not a swipe | A swipe with no visible affordance is an iOS idiom; the button is discoverable and the confirm replaces the swipe's own undo-by-not-completing. |
 | Basemap is a Maps JSON style, not CARTO tiles | Google Maps restyles itself; MapKit cannot, which is why iOS ships raster tiles. |
 | Engine lives on the `Application` | An Activity-scoped engine would be silenced by a rotation. |

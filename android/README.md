@@ -62,7 +62,7 @@ follows from that:
 | Interruptions | `AVAudioSession.interruptionNotification` | `AudioManager` focus loss / gain |
 | Headphones removed | Route change, `.oldDeviceUnavailable` | `ACTION_AUDIO_BECOMING_NOISY` |
 | Basemap | CARTO raster tiles, because MapKit can't restyle | Google Maps JSON style (`res/raw/map_style_*.json`) |
-| Background location | Part of the "Always" grant | A **separate** permission request, only offerable after the foreground grant |
+| Background location | Part of the "Always" grant | **Not requested.** The location-type foreground service, started by pressing play, keeps GPS flowing with the screen off on the while-in-use grant. Play rejected 1.0.1 for asking for "Allow all the time" as well. |
 | Engine lifetime | The app object | The `Application`, so a rotation can't silence a walk |
 
 The pre-permission screen says **"Continue"**, never "Enable" — App Review rejected the older iOS

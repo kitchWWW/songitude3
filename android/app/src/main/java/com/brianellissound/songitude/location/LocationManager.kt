@@ -8,7 +8,6 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.location.Location
-import android.os.Build
 import android.os.Looper
 import androidx.core.content.ContextCompat
 import com.brianellissound.songitude.model.LatLngD
@@ -32,7 +31,7 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 class SongitudeLocationManager(private val context: Context) : SensorEventListener {
 
-    enum class Authorization { NOT_DETERMINED, DENIED, WHEN_IN_USE, ALWAYS }
+    enum class Authorization { NOT_DETERMINED, DENIED, WHEN_IN_USE }
 
     companion object {
         /** Once a second. Enough to catch a walker crossing a boundary — at a brisk pace that is
@@ -91,16 +90,12 @@ class SongitudeLocationManager(private val context: Context) : SensorEventListen
                 PackageManager.PERMISSION_GRANTED
         val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
                 PackageManager.PERMISSION_GRANTED
-        if (!fine && !coarse) return Authorization.NOT_DETERMINED
-        val background = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_BACKGROUND_LOCATION) ==
-                    PackageManager.PERMISSION_GRANTED
-        } else true
-        return if (background) Authorization.ALWAYS else Authorization.WHEN_IN_USE
+        // There is no ALWAYS: background location is never requested (see the manifest).
+        return if (fine || coarse) Authorization.WHEN_IN_USE else Authorization.NOT_DETERMINED
     }
 
     val isAuthorized: Boolean
-        get() = _authorization.value == Authorization.WHEN_IN_USE || _authorization.value == Authorization.ALWAYS
+        get() = _authorization.value == Authorization.WHEN_IN_USE
 
     /** Best guess at where we are WITHOUT starting updates. Used to sort the catalog nearest-first
      *  and to prime the engine the moment play is pressed; never triggers a new request.

@@ -110,32 +110,15 @@ private fun Root(app: AppState, deepLink: Uri?) {
         else app.completeOnboarding()
     }
 
-    // Foreground location first. Background location has to be a separate request, and Android only
-    // offers it once the foreground grant exists — and on Android 11+ it opens a full Settings page
-    // rather than a dialog, which is why advancing has to wait for *this* to come back.
-    val backgroundLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
+    // Foreground location only. The walk runs in a location-type foreground service, which keeps
+    // GPS flowing with the screen off on this grant alone; see the manifest for why there is no
+    // background request.
+    val foregroundLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
     ) {
         app.onPermissionResult()
         awaitingSystemUi = false
         advancePastLocation()
-    }
-
-    val foregroundLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { granted ->
-        app.onPermissionResult()
-        val fine = granted[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-            granted[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        if (fine && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Stay on this screen: the background request is about to open Settings, and advancing
-            // now would render the next screen behind it, visible the moment Settings is dismissed
-            // — or, worse, glimpsed before it even appears.
-            backgroundLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-        } else {
-            awaitingSystemUi = false
-            advancePastLocation()
-        }
     }
 
     LaunchedEffect(deepLink) { deepLink?.let { app.handleDeepLink(it) } }
@@ -214,9 +197,15 @@ private fun Root(app: AppState, deepLink: Uri?) {
         AlertDialog(
             onDismissRequest = { app.dismissPermissionAlert() },
             title = { Text("Location is off") },
+            // A second route to the location grant for anyone who chose "Not now" in onboarding, so it
+            // carries the full Prominent Disclosure too: what is used, how, with the screen locked,
+            // and that it is never shared. Play rejected 1.0.1 for vaguer wording.
             text = {
-                Text("Songitude needs your location to know which part of the music to play. " +
-                    "You can turn it on in system Settings.")
+                Text("Songitude uses your location data to choose what you hear: your position decides " +
+                    "which sounds play and how loud, including while a walk plays with your screen " +
+                    "locked or the phone in your pocket. Your location stays on this phone and is " +
+                    "never uploaded, stored or shared.\n\n" +
+                    "To start a walk, turn on location for Songitude in system Settings.")
             },
             confirmButton = {
                 TextButton(onClick = {

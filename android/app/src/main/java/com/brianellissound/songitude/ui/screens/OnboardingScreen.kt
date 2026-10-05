@@ -151,7 +151,14 @@ private fun CopyBlock(text: String, bold: Boolean = false) {
     }
 }
 
-/** Step one: why the app needs to know where you are. */
+/**
+ * Step one: why the app needs to know where you are.
+ *
+ * This is Play's Prominent Disclosure, and its wording is load-bearing. 1.0.1 was rejected
+ * (Inadequate Prominent Disclosure, Oct 2026) because "your position" never said *location data*,
+ * and nothing said it is used with the screen locked. It must name the data, say how it is used and
+ * shared, cover the locked-screen use, and sit directly before the system prompt.
+ */
 @Composable
 fun LocationOnboarding(
     hidesLogo: Boolean = false,
@@ -167,9 +174,9 @@ fun LocationOnboarding(
     title = "Songitude",
     subtitle = "music on the map",
     body = """
-        - Your position changes the music you hear.
-        - Songitude only uses your location locally on this phone.
-        - It is never uploaded, stored or shared.
+        - Songitude uses your location data to choose what you hear: your position decides which sounds play and how loud.
+        - It is used while a walk is playing, including when your screen is locked or the phone is in your pocket.
+        - Your location stays on this phone. It is never uploaded, stored or shared.
     """.trimIndent(),
     onContinue = onContinue,
     onNotNow = onNotNow,
@@ -194,7 +201,7 @@ fun NotificationOnboarding(
     subtitle = "So the music keeps playing.",
     body = """
         - For the best experience, you might want to lock your phone and put it in your pocket.
-        - In order to keep giving you location-accurate audio, we need permission to run in the background.
+        - Allowing notifications lets Songitude show playback controls on your lock screen, so the walk keeps going with the screen off.
     """.trimIndent(),
     footnote = "We will never send you a notification. " +
         "Nothing is ever pushed at you — no alerts, no announcements, no reminders.",

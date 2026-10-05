@@ -9,8 +9,10 @@
          rather than break. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <!-- Audio has to keep responding to movement with the screen off and the phone pocketed. -->
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!-- No ACCESS_BACKGROUND_LOCATION. The walk keeps hearing GPS with the screen off because the
+         playback service is a location-type foreground service started from Play, which runs on
+         the while-in-use grant. Asking for "Allow all the time" on top of that got 1.0.1 rejected
+         for Inadequate Prominent Disclosure (Oct 2026) and buys nothing the service doesn't. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
