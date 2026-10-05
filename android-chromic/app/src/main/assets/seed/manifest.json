@@ -1,6 +1,6 @@
 {
  "version": 1,
- "generatedAt": "2026-10-01T15:36:45.998Z",
+ "generatedAt": "2026-10-03T21:54:11.969Z",
  "walks": [
   {
    "id": "garden-of-memories-7cf9a10a",
@@ -11,14 +11,14 @@
    "artUrl": "https://songitude-walks.s3.amazonaws.com/walks/garden-of-memories-7cf9a10a/IMG_4390.jpg",
    "portable": false,
    "center": [
-    38.93209072603488,
-    -77.06017881631853
+    38.93195614878003,
+    -77.0599964261055
    ],
-   "zoom": 19,
+   "zoom": 18,
    "shapeCount": 18,
    "owner": "chromic.duo@gmail.com",
-   "updatedAt": "2026-10-01T15:35:46.669Z",
-   "sizeBytes": 133672893,
+   "updatedAt": "2026-10-03T21:53:14.751Z",
+   "sizeBytes": 139734599,
    "base": "https://songitude-walks.s3.amazonaws.com/walks/garden-of-memories-7cf9a10a",
    "mapUrl": "https://songitude-walks.s3.amazonaws.com/walks/garden-of-memories-7cf9a10a/map.json",
    "zipUrl": "https://songitude-walks.s3.amazonaws.com/walks/garden-of-memories-7cf9a10a/bundle.zip"
