@@ -53,6 +53,9 @@ a{color:inherit}
 .big.apple,.big.apple.match{background:linear-gradient(135deg,#FF5C8A,#FF9A5A);color:#fff}
 .big.play,.big.play.match{background:linear-gradient(135deg,#7B5CFA,#3FA7FF);color:#fff}
 .big.apple,.big.play{align-items:center}
+.big.soon{cursor:default;opacity:.75}
+.big.soon:active{transform:none}
+.big.soon small{font-weight:600;opacity:1}
 
 /* The download button on each phone's page: a store listing row in that platform's own idiom
    (icon, name, subtitle, a blue Get/Install pill) so it reads as "this is the app", not as
