@@ -346,6 +346,7 @@ button.publish:hover { background: #5c3fe0; }
 /* My-walks list */
 .walks-list { display: flex; flex-direction: column; gap: 10px; }
 .walks-empty { color: var(--muted); text-align: center; padding: 26px; }
+.walks-section { margin: 14px 0 2px; font-size: 13px; font-weight: 600; color: var(--muted); }
 .walk-item { display: flex; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
 .walk-item .info { flex: 1; min-width: 0; }
 .walk-item .info h4 { margin: 0 0 2px; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

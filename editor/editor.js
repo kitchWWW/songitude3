@@ -3139,20 +3139,35 @@
   }
 
   // ---- My walks: manage the signed-in user's published walks -----------
+  // Super users also see every other walk on the platform, to inspect and load. The manifest is
+  // public, so this only widens the list; update/delete stay owner-only in the presign Lambda.
+  const SUPER_USERS = ["brian.e2014@gmail.com"];
+  const isOwn = (w) => (w.owner || "").toLowerCase() === (userEmail || "").toLowerCase();
   function openWalksModal() {
     if (!idToken || !userEmail) { toast("Sign in with Google first.", "err"); return; }
     $("walksModal").hidden = false;
     renderWalksList("<p class='walks-empty'>Loading…</p>");
+    const superUser = SUPER_USERS.includes(userEmail.toLowerCase());
     fetch("https://songitude-walks.s3.amazonaws.com/walks/manifest.json", { cache: "no-store" })
       .then((r) => r.json())
-      .then((m) => renderWalksList((m.walks || []).filter((w) => (w.owner || "").toLowerCase() === userEmail.toLowerCase())))
+      .then((m) => {
+        const all = m.walks || [];
+        renderWalksList(all.filter(isOwn), superUser ? all.filter((w) => !isOwn(w)) : null);
+      })
       .catch((e) => renderWalksList("<p class='walks-empty'>Couldn't load: " + e.message + "</p>"));
   }
-  function renderWalksList(walks) {
+  function renderWalksList(walks, others) {
     const list = $("walksList");
     if (typeof walks === "string") { list.innerHTML = walks; return; }
-    if (!walks.length) { list.innerHTML = "<p class='walks-empty'>You haven't published any walks yet.</p>"; return; }
     list.innerHTML = "";
+    if (!walks.length) list.innerHTML = "<p class='walks-empty'>You haven't published any walks yet.</p>";
+    appendWalkItems(list, walks);
+    if (others && others.length) {
+      list.append(el("h3", "walks-section", `All other walks on the platform (${others.length})`));
+      appendWalkItems(list, others);
+    }
+  }
+  function appendWalkItems(list, walks) {
     for (const w of walks) {
       const item = el("div", "walk-item");
       const info = el("div", "info");
@@ -3163,8 +3178,11 @@
       const actions = el("div", "actions");
       const dl = el("button", null, "⇩ Download"); dl.onclick = () => downloadWalkZip(w);
       const load = el("button", null, "✎ Load"); load.onclick = () => loadWalkIntoEditor(w, load);
-      const del = el("button", "danger", "🗑 Delete"); del.onclick = () => deleteWalkFromServer(w, del);
-      actions.append(dl, load, del);
+      actions.append(dl, load);
+      if (isOwn(w)) {
+        const del = el("button", "danger", "🗑 Delete"); del.onclick = () => deleteWalkFromServer(w, del);
+        actions.append(del);
+      }
       item.append(info, actions);
       list.append(item);
     }
@@ -3184,9 +3202,13 @@
       const r = await fetch(w.zipUrl, { cache: "no-store" });
       if (!r.ok) throw new Error("HTTP " + r.status);
       await importZip(await r.blob());
-      state.walkId = w.id;   // now editing an owned published walk → publish offers "Update existing"
+      // Only an owned walk can be updated in place; someone else's opens as an unpublished copy,
+      // since the Lambda would refuse the update anyway.
+      const own = isOwn(w);
+      state.walkId = own ? w.id : null;
       $("walksModal").hidden = true;
-      toast(`Loaded “${w.name}”. Edit, then Publish → Update existing walk.`, "ok");
+      toast(own ? `Loaded “${w.name}”. Edit, then Publish → Update existing walk.`
+                : `Loaded “${w.name}” (by ${w.creator || w.owner || "another author"}) as an unpublished copy.`, "ok");
     } catch (e) {
       toast("Load failed: " + e.message, "err");
     } finally {
